@@ -31,7 +31,18 @@ endif()
 # Shared helpers used by the application executable(s).
 add_library(cbir_common STATIC
 	src/csv_util.cpp
+	src/features.cpp
+	src/common.cpp
+	src/feature_store.cpp
+	src/metrics.cpp
+
+	include/features.h
 	include/csv_util.h
+	include/common.h
+	include/feature_store.h
+	include/metrics.h
+	include/display.h
+	src/display.cpp
 )
 target_include_directories(cbir_common PUBLIC
 	"${PROJECT_SOURCE_DIR}/include"
@@ -67,5 +78,6 @@ function(add_cbir_executable target)
 	endif()
 endfunction()
 
-# Add each program here, listing its entry-point source file(s). For example:
-# add_cbir_executable(image_search src/main.cpp)
+# Add each program here, listing its entry-point source file(s).
+add_cbir_executable(extract src/extract.cpp)
+add_cbir_executable(query src/query.cpp)
