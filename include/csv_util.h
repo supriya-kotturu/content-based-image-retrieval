@@ -3,12 +3,14 @@
 
   Utility functions for reading and writing CSV files with a specific format
 
-  Each line of the csv file is a filename in the first column, followed by numeric data for the remaining columns
-  Each line of the csv file has to have the same number of columns
+  Each line of the csv file is a filename in the first column, followed by numeric data for the
+  remaining columns Each line of the csv file has to have the same number of columns
  */
 
 #ifndef CVS_UTIL_H
 #define CVS_UTIL_H
+
+#include <vector>
 
 /*
   Given a filename, and image filename, and the image features, by
@@ -22,8 +24,8 @@
 
   The function returns a non-zero value in case of an error.
  */
-int append_image_data_csv( char *filename, char *image_filename, std::vector<float> &image_data, int reset_file = 0 );
-
+int append_image_data_csv(char* filename, char* image_filename, std::vector<float>& image_data,
+                          int reset_file = 0);
 
 /*
   Given a file with the format of a string as the first column and
@@ -39,6 +41,7 @@ int append_image_data_csv( char *filename, char *image_filename, std::vector<flo
 
   The function returns a non-zero value if something goes wrong.
  */
-int read_image_data_csv( char *filename, std::vector<char *> &filenames, std::vector<std::vector<float>> &data, int echo_file = 0 );
+int read_image_data_csv(char* filename, std::vector<char*>& filenames,
+                        std::vector<std::vector<float>>& data, int echo_file = 0);
 
 #endif
