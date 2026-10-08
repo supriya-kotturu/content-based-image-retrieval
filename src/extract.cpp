@@ -1,10 +1,9 @@
-#include <opencv2/imgcodecs.hpp>
-
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
 #include <functional>
 #include <iostream>
+#include <opencv2/imgcodecs.hpp>
 #include <string>
 #include <vector>
 
@@ -64,7 +63,8 @@ int extractAll(const std::vector<fs::path>& files, const fs::path& root, const F
 
         std::vector<float> vec;
         int rc = compute(img, vec);
-        if (rc == FEATURE_ERR_BAD_PATCH_SIZE) {
+        // Config errors are identical for every image, so retrying the rest is pointless
+        if (rc == FEATURE_ERR_BAD_PATCH_SIZE || rc == FEATURE_ERR_BAD_BINS) {
             return rc;
         }
         if (rc != FEATURE_OK) {
@@ -86,10 +86,28 @@ int extractAll(const std::vector<fs::path>& files, const fs::path& root, const F
 // One wrapper per feature: it only supplies the per-image callback. A feature that needs
 // setup (e.g. loading a model once) does it here before calling extractAll.
 int extractBaseline(const std::vector<fs::path>& files, const fs::path& root, int patchSize,
-                    std::vector<std::string>& imagePaths,
-                    std::vector<std::vector<float>>& vectors, std::size_t& skipped) {
+                    std::vector<std::string>& imagePaths, std::vector<std::vector<float>>& vectors,
+                    std::size_t& skipped) {
     auto compute = [patchSize](const cv::Mat& img, std::vector<float>& out) {
         return baselineFeature(img, out, patchSize);
+    };
+    return extractAll(files, root, compute, imagePaths, vectors, skipped);
+}
+
+int extractHistogram(const std::vector<fs::path>& files, const fs::path& root, int bins,
+                     std::vector<std::string>& imagePaths, std::vector<std::vector<float>>& vectors,
+                     std::size_t& skipped) {
+    auto compute = [bins](const cv::Mat& img, std::vector<float>& out) {
+        return histogram(img, out, bins);
+    };
+    return extractAll(files, root, compute, imagePaths, vectors, skipped);
+}
+
+int extractMultiHistogram(const std::vector<fs::path>& files, const fs::path& root, int bins,
+                          int centerSize, std::vector<std::string>& imagePaths,
+                          std::vector<std::vector<float>>& vectors, std::size_t& skipped) {
+    auto compute = [bins, centerSize](const cv::Mat& img, std::vector<float>& out) {
+        return multiHistogram(img, out, bins, centerSize);
     };
     return extractAll(files, root, compute, imagePaths, vectors, skipped);
 }
@@ -98,31 +116,23 @@ int extractBaseline(const std::vector<fs::path>& files, const fs::path& root, in
 int main(int argc, char** argv) {
     Args args;
     if (!args.parse(argc, argv)) {
-        std::cerr
-            << "usage: extract db=<dir> [root=data] [feature=baseline] [patch=7] [out=<dir>]\n";
+        std::cerr << "usage: extract db=<dir> [root=data] "
+                     "[feature=baseline|histogram|multi_histogram] [patch=<odd size>] "
+                     "[bins=16] [out=<dir>]\n";
         return 1;
     }
 
     args.print(std::cout);
 
     std::string root = args.get("root", DEFAULT_DATA_ROOT);
-    std::string outDir =
-        args.get("out", (fs::path(root) / DEFAULT_CSV_SUBDIR).generic_string());
+    std::string outDir = args.get("out", (fs::path(root) / DEFAULT_CSV_SUBDIR).generic_string());
     std::string featureName = args.get("feature", "baseline");
-    std::string patchText = args.get("patch", std::to_string(DEFAULT_PATCH_SIZE));
+    std::string patchText = args.get("patch");  // empty = use the feature's own default
+    std::string binsText = args.get("bins", std::to_string(DEFAULT_BIN_SIZE));
     std::string db = args.get("db");
 
     if (db.empty()) {
         std::cerr << "db is required\n";
-        return 1;
-    }
-
-    // stoi throws on non-numeric input; a bad patch is a config error, so abort the run
-    int patchSize = 0;
-    try {
-        patchSize = std::stoi(patchText);
-    } catch (const std::exception&) {
-        std::cerr << "invalid patch: " << patchText << "\n";
         return 1;
     }
 
@@ -131,6 +141,31 @@ int main(int argc, char** argv) {
 
     if (status != STORE_OK) {
         std::cerr << "unknown feature: " << featureName << "\n";
+        return 1;
+    }
+
+    // `patch` means the baseline's patch side or the multi histogram's centre side, and the
+    // sensible default differs: 7 pixels is a fine patch but a useless histogram region
+    if (patchText.empty()) {
+        patchText = std::to_string(featureType == FeatureType::MULTI_HISTOGRAM
+                                       ? DEFAULT_CENTER_SIZE
+                                       : DEFAULT_PATCH_SIZE);
+    }
+
+    // stoi throws on non-numeric input; a bad patch is a config error, so abort the run
+    int patchSize = 0;
+    int bins = 0;
+    try {
+        patchSize = std::stoi(patchText);
+    } catch (const std::exception&) {
+        std::cerr << "invalid patch: " << patchText << "\n";
+        return 1;
+    }
+
+    try {
+        bins = std::stoi(binsText);
+    } catch (const std::exception&) {
+        std::cerr << "invalid bins: " << binsText << "\n";
         return 1;
     }
 
@@ -173,9 +208,17 @@ int main(int argc, char** argv) {
         case FeatureType::BASELINE:
             rc = extractBaseline(files, root, patchSize, imagePaths, vectors, skipped);
             break;
+        case FeatureType::HISTOGRAM:
+            rc = extractHistogram(files, root, bins, imagePaths, vectors, skipped);
+            break;
+        case FeatureType::MULTI_HISTOGRAM:
+            rc = extractMultiHistogram(files, root, bins, patchSize, imagePaths, vectors,
+                                       skipped);
+            break;
     }
     if (rc != FEATURE_OK) {
-        std::cerr << featureErrorString(rc) << " (patch=" << patchSize << ")\n";
+        std::cerr << featureErrorString(rc) << " (patch=" << patchSize << ", bins=" << bins
+                  << ")\n";
         return 1;
     }
 
@@ -188,8 +231,23 @@ int main(int argc, char** argv) {
     FeatureMeta meta;
     meta.feature = featureType;
     meta.patch = patchSize;
-    std::string csvName = std::string(featureTypeName(featureType)) + "_" +
-                          std::to_string(patchSize) + "x" + std::to_string(patchSize) + ".csv";
+    meta.bins = bins;
+    std::string csvName;
+
+    switch (featureType) {
+        case FeatureType::BASELINE:
+            csvName = "baseline_" + std::to_string(meta.patch) + "x" + std::to_string(meta.patch) +
+                      ".csv";
+            break;
+        case FeatureType::HISTOGRAM:
+            csvName = "histogram_" + std::to_string(meta.bins) + ".csv";
+            break;
+        case FeatureType::MULTI_HISTOGRAM:
+            csvName = "multi_histogram_" + std::to_string(meta.bins) + "_c" +
+                      std::to_string(meta.patch) + ".csv";
+            break;
+    }
+
     std::string csvPath = (fs::path(outDir) / csvName).generic_string();
 
     if (saveFeatures(csvPath, meta, imagePaths, vectors) != STORE_OK) {

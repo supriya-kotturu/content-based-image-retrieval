@@ -6,6 +6,7 @@
 
 constexpr const int PATCH_CHANNELS = 3;
 constexpr const int DEFAULT_PATCH_SIZE = 7;
+constexpr const int DEFAULT_BIN_SIZE = 16;
 constexpr const char* DEFAULT_DATA_ROOT = "data";
 constexpr const char* DEFAULT_CSV_SUBDIR = "csv";
 
@@ -16,6 +17,7 @@ enum FeatureStatus : int {
     FEATURE_ERR_BAD_TYPE = -2,
     FEATURE_ERR_BAD_PATCH_SIZE = -3,
     FEATURE_ERR_PATCH_TOO_LARGE = -4,
+    FEATURE_ERR_BAD_BINS = -5,  // config error: same for every image, like BAD_PATCH_SIZE
 };
 
 // Maps a FeatureStatus to a static, human-readable reason so callers can log
@@ -38,7 +40,31 @@ int validateImage(const cv::Mat& img);
 //
 // `out` is cleared on entry and its contents are unspecified on failure.
 // Returns FEATURE_OK or a negative FeatureStatus.
-int baselineFeature(const cv::Mat& img, std::vector<float>& out,
+int baselineFeature(const cv::Mat& frame, std::vector<float>& feature,
                     int patchSize = DEFAULT_PATCH_SIZE);
+
+// Whole-image rg chromaticity histogram: bins*bins fractions summing to 1 (all zeros for an
+// all-black image).
+int histogram(const cv::Mat& frame, std::vector<float>& feature, int bins = DEFAULT_BIN_SIZE);
+
+// Bins per channel for the centre region's RGB histogram. Fixed (8 -> 512 cells) because a
+// bins^3 histogram at the user's `bins` would be enormous.
+constexpr const int CENTER_RGB_BINS = 8;
+
+// Default side of the centre square for multiHistogram. The baseline's 7 would leave a few dozen
+// pixels spread over 512 cells, which says nothing about the image.
+constexpr const int DEFAULT_CENTER_SIZE = 101;
+
+// Sizes of the pieces multiHistogram concatenates, in order: top, bottom, centre. The metric
+// needs these to split the vector back apart.
+std::vector<std::size_t> multiHistogramLayout(int bins);
+
+// Three histograms of different regions, concatenated into one vector:
+//   top half     -> rg chromaticity, bins*bins
+//   bottom half  -> bg chromaticity, bins*bins
+//   centre       -> RGB, CENTER_RGB_BINS^3, over a centerSize x centerSize square
+// Each piece is normalized to sum to 1 on its own. centerSize follows the same rules as the
+// baseline's patch (positive, odd, no larger than the image).
+int multiHistogram(const cv::Mat& frame, std::vector<float>& feature, int bins, int centerSize);
 
 #endif

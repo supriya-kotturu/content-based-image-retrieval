@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <iostream>
+#include <opencv2/core/utils/logger.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <sstream>
 #include <string>
@@ -40,12 +41,26 @@ int computeTarget(const FeatureMeta& meta, const cv::Mat& img, std::vector<float
     switch (meta.feature) {
         case FeatureType::BASELINE:
             return baselineFeature(img, out, meta.patch);
+        case FeatureType::HISTOGRAM:
+            return histogram(img, out, meta.bins);
+        case FeatureType::MULTI_HISTOGRAM:
+            return multiHistogram(img, out, meta.bins, meta.patch);
     }
     return FEATURE_ERR_BAD_TYPE;
+}
+
+// Piece lengths of a concatenated vector; only MULTI uses them, others compare as one vector
+std::vector<std::size_t> chunksFor(const FeatureMeta& meta) {
+    if (meta.feature == FeatureType::MULTI_HISTOGRAM) {
+        return multiHistogramLayout(meta.bins);
+    }
+    return {};
 }
 }  // namespace
 
 int main(int argc, char** argv) {
+    cv::utils::logging::setLogLevel(cv::utils::logging::LOG_LEVEL_WARNING);
+
     Args args;
     if (!args.parse(argc, argv)) {
         std::cerr << "usage: query csv=<file> target=<image> [metric=ssd] [top=10]\n";
@@ -97,6 +112,31 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    // Intersection assumes fractions summing to 1; baseline holds raw 0..255 pixels, so the
+    // result would be a hugely negative distance and a silently meaningless ranking
+    if (metric == Metric::INTERSECTION && meta.feature != FeatureType::HISTOGRAM) {
+        std::cerr << "metric intersection needs a histogram csv, but " << csv << " is "
+                  << featureTypeName(meta.feature) << "\n";
+        return 1;
+    }
+    // multi splits the vector by the multi histogram's layout, so it only means anything there
+    if (metric == Metric::MULTI && meta.feature != FeatureType::MULTI_HISTOGRAM) {
+        std::cerr << "metric multi needs a multi_histogram csv, but " << csv << " is "
+                  << featureTypeName(meta.feature) << "\n";
+        return 1;
+    }
+
+    const std::vector<std::size_t> chunks = chunksFor(meta);
+    std::size_t chunkTotal = 0;
+    for (std::size_t length : chunks) {
+        chunkTotal += length;
+    }
+    if (!chunks.empty() && chunkTotal != meta.vectorLength) {
+        std::cerr << csv << ": vector length " << meta.vectorLength
+                  << " does not match the layout for bins=" << meta.bins << "\n";
+        return 1;
+    }
+
     cv::Mat img = cv::imread(targetPath);
     if (img.empty()) {
         std::cerr << targetPath << ": could not read target image\n";
@@ -129,7 +169,7 @@ int main(int argc, char** argv) {
         if (currentImageFile == targetName) {
             continue;  // the target matches itself at 0; the handout's matches exclude it
         }
-        ranked.emplace_back(distance(metric, target, vectors[i]), i);
+        ranked.emplace_back(distance(metric, target, vectors[i], chunks), i);
     }
 
     const std::size_t n = std::min<std::size_t>(static_cast<std::size_t>(top), ranked.size());
@@ -153,8 +193,15 @@ int main(int argc, char** argv) {
 
     // Settings in the window so a screenshot for the report says how it was produced
     std::ostringstream title;
-    title << featureTypeName(meta.feature) << "  patch=" << meta.patch << "x" << meta.patch
-          << "  metric=" << metricName << "  top=" << n;
+    title << featureTypeName(meta.feature);
+    if (meta.feature == FeatureType::BASELINE) {
+        title << "  patch=" << meta.patch << "x" << meta.patch;
+    } else if (meta.feature == FeatureType::HISTOGRAM) {
+        title << "  bins=" << meta.bins;
+    } else {
+        title << "  bins=" << meta.bins << "  center=" << meta.patch << "x" << meta.patch;
+    }
+    title << "  metric=" << metricName << "  top=" << n;
 
     showResults(targetPath, matchedPaths, matchLabels, title.str(), 300);
     return 0;

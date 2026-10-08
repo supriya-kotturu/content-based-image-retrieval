@@ -9,6 +9,7 @@ namespace {
 constexpr const char* KEY_FEATURE = "feature";
 constexpr const char* KEY_PATCH = "patch";
 constexpr const char* KEY_ROWS = "rows";
+constexpr const char* KEY_BINS = "bins";
 constexpr const char* KEY_VECTOR_LENGTH = "vector_length";
 
 template <typename T>
@@ -30,7 +31,8 @@ StoreStatus readMeta(const std::string& metaPath, FeatureMeta& meta) {
         return STORE_ERR_IO;
     }
 
-    int keyCount = 0;
+    bool seenFeature = false, seenPatch = false, seenBins = false;
+    bool seenRows = false, seenVectorLength = false;
     std::string line;
 
     // stoi/stoul throw on garbage; a corrupt meta must not crash the caller
@@ -48,16 +50,19 @@ StoreStatus readMeta(const std::string& metaPath, FeatureMeta& meta) {
                 if (status != STORE_OK) {
                     return status;
                 }
-                keyCount++;
+                seenFeature = true;
             } else if (key == KEY_PATCH) {
                 meta.patch = std::stoi(value);
-                keyCount++;
+                seenPatch = true;
             } else if (key == KEY_ROWS) {
                 meta.rows = std::stoul(value);
-                keyCount++;
+                seenRows = true;
+            } else if (key == KEY_BINS) {
+                meta.bins = std::stoi(value);
+                seenBins = true;
             } else if (key == KEY_VECTOR_LENGTH) {
                 meta.vectorLength = std::stoul(value);
-                keyCount++;
+                seenVectorLength = true;
             }
             // Unknown keys are ignored so a newer extract can add fields
         }
@@ -65,7 +70,21 @@ StoreStatus readMeta(const std::string& metaPath, FeatureMeta& meta) {
         return STORE_ERR_BAD_META;
     }
 
-    return keyCount == 4 ? STORE_OK : STORE_ERR_BAD_META;
+    if (!seenFeature || !seenRows || !seenVectorLength) {
+        return STORE_ERR_BAD_META;
+    }
+
+    switch (meta.feature) {
+        case FeatureType::BASELINE:
+            return seenPatch ? STORE_OK : STORE_ERR_BAD_META;
+        case FeatureType::HISTOGRAM:
+            return seenBins ? STORE_OK : STORE_ERR_BAD_META;
+        case FeatureType::MULTI_HISTOGRAM:
+            // bins sizes the chromaticity pieces, patch is the centre square's side
+            return (seenBins && seenPatch) ? STORE_OK : STORE_ERR_BAD_META;
+    }
+
+    return STORE_ERR_BAD_META;
 }
 
 StoreStatus writeMeta(const std::string& metaPath, const FeatureMeta& meta) {
@@ -75,9 +94,21 @@ StoreStatus writeMeta(const std::string& metaPath, const FeatureMeta& meta) {
     }
 
     writeKV(out, KEY_FEATURE, featureTypeName(meta.feature));
-    writeKV(out, KEY_PATCH, meta.patch);
-    writeKV(out, KEY_ROWS, meta.rows);
     writeKV(out, KEY_VECTOR_LENGTH, meta.vectorLength);
+    writeKV(out, KEY_ROWS, meta.rows);
+
+    switch (meta.feature) {
+        case FeatureType::BASELINE:
+            writeKV(out, KEY_PATCH, meta.patch);
+            break;
+        case FeatureType::HISTOGRAM:
+            writeKV(out, KEY_BINS, meta.bins);
+            break;
+        case FeatureType::MULTI_HISTOGRAM:
+            writeKV(out, KEY_BINS, meta.bins);
+            writeKV(out, KEY_PATCH, meta.patch);
+            break;
+    }
 
     out.flush();
     return out ? STORE_OK : STORE_ERR_IO;
@@ -89,6 +120,12 @@ StoreStatus parseFeatureType(const std::string& name, FeatureType& out) {
     if (name == "baseline") {
         out = FeatureType::BASELINE;
         return STORE_OK;
+    } else if (name == "histogram") {
+        out = FeatureType::HISTOGRAM;
+        return STORE_OK;
+    } else if (name == "multi_histogram") {
+        out = FeatureType::MULTI_HISTOGRAM;
+        return STORE_OK;
     }
     return STORE_ERR_UNKNOWN_FEATURE;
 }
@@ -97,6 +134,10 @@ const char* featureTypeName(FeatureType type) {
     switch (type) {
         case FeatureType::BASELINE:
             return "baseline";
+        case FeatureType::HISTOGRAM:
+            return "histogram";
+        case FeatureType::MULTI_HISTOGRAM:
+            return "multi_histogram";
     }
     // No default above so -Wswitch flags a new enumerator; this covers out-of-range values
     return "unknown feature type";

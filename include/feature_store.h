@@ -18,7 +18,7 @@ enum StoreStatus : int {
     STORE_ERR_UNKNOWN_FEATURE = -5,  // feature name not recognized
 };
 
-enum class FeatureType { BASELINE };
+enum class FeatureType { BASELINE, HISTOGRAM, MULTI_HISTOGRAM };
 
 // Parses the on-disk / command-line spelling (e.g. "baseline") into `out`.
 // Returns STORE_OK or STORE_ERR_UNKNOWN_FEATURE; `out` is untouched on failure. The caller
@@ -35,6 +35,7 @@ const char* featureTypeName(FeatureType type);
 struct FeatureMeta {
     FeatureType feature = FeatureType::BASELINE;
     int patch = DEFAULT_PATCH_SIZE;
+    int bins = DEFAULT_BIN_SIZE;
     std::size_t rows = 0;
     std::size_t vectorLength = 0;
 };
