@@ -1,0 +1,5 @@
+feature=multi_histogram
+vector_length=1024
+rows=1106
+bins=16
+patch=101
