@@ -82,6 +82,8 @@ StoreStatus readMeta(const std::string& metaPath, FeatureMeta& meta) {
         case FeatureType::MULTI_HISTOGRAM:
             // bins sizes the chromaticity pieces, patch is the centre square's side
             return (seenBins && seenPatch) ? STORE_OK : STORE_ERR_BAD_META;
+        case FeatureType::TEXTURE_COLOR:
+            return seenBins ? STORE_OK : STORE_ERR_BAD_META;
     }
 
     return STORE_ERR_BAD_META;
@@ -108,6 +110,9 @@ StoreStatus writeMeta(const std::string& metaPath, const FeatureMeta& meta) {
             writeKV(out, KEY_BINS, meta.bins);
             writeKV(out, KEY_PATCH, meta.patch);
             break;
+        case FeatureType::TEXTURE_COLOR:
+            writeKV(out, KEY_BINS, meta.bins);
+            break;
     }
 
     out.flush();
@@ -126,6 +131,9 @@ StoreStatus parseFeatureType(const std::string& name, FeatureType& out) {
     } else if (name == "multi_histogram") {
         out = FeatureType::MULTI_HISTOGRAM;
         return STORE_OK;
+    } else if (name == "texture_color") {
+        out = FeatureType::TEXTURE_COLOR;
+        return STORE_OK;
     }
     return STORE_ERR_UNKNOWN_FEATURE;
 }
@@ -138,6 +146,8 @@ const char* featureTypeName(FeatureType type) {
             return "histogram";
         case FeatureType::MULTI_HISTOGRAM:
             return "multi_histogram";
+        case FeatureType::TEXTURE_COLOR:
+            return "texture_color";
     }
     // No default above so -Wswitch flags a new enumerator; this covers out-of-range values
     return "unknown feature type";

@@ -18,7 +18,7 @@ enum StoreStatus : int {
     STORE_ERR_UNKNOWN_FEATURE = -5,  // feature name not recognized
 };
 
-enum class FeatureType { BASELINE, HISTOGRAM, MULTI_HISTOGRAM };
+enum class FeatureType { BASELINE, HISTOGRAM, MULTI_HISTOGRAM, TEXTURE_COLOR };
 
 // Parses the on-disk / command-line spelling (e.g. "baseline") into `out`.
 // Returns STORE_OK or STORE_ERR_UNKNOWN_FEATURE; `out` is untouched on failure. The caller

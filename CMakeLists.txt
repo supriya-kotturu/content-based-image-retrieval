@@ -11,13 +11,16 @@ if((NOT OpenCV_DIR OR OpenCV_DIR MATCHES "-NOTFOUND$")
 	set(OpenCV_DIR "C:/opencv/build" CACHE PATH "Directory containing OpenCVConfig.cmake" FORCE)
 endif()
 
-# Keep executables and libraries together in out/, including with Visual Studio.
+# Executables go in out/, including with Visual Studio. Static libraries get a folder per
+# configuration: Debug and Release share a filename, so with one folder the last build silently
+# overwrote the other's .lib and Release links failed against a Debug library (LNK2019 on
+# cv::debug_build_guard symbols).
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/out")
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/out")
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/out/lib")
 foreach(config ${CMAKE_CONFIGURATION_TYPES})
 	string(TOUPPER "${config}" config_upper)
 	set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${config_upper} "${PROJECT_SOURCE_DIR}/out")
-	set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_${config_upper} "${PROJECT_SOURCE_DIR}/out")
+	set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_${config_upper} "${PROJECT_SOURCE_DIR}/out/lib/${config}")
 endforeach()
 
 find_package(OpenCV REQUIRED)
@@ -35,7 +38,9 @@ add_library(cbir_common STATIC
 	src/common.cpp
 	src/feature_store.cpp
 	src/metrics.cpp
+	src/sobel.cpp
 
+	include/sobel.h
 	include/features.h
 	include/csv_util.h
 	include/common.h

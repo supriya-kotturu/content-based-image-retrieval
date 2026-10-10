@@ -1,7 +1,10 @@
 #include <features.h>
+#include <sobel.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
+#include <opencv2/imgproc.hpp>
 
 namespace {
 // Odd size so the patch has a true center pixel
@@ -114,6 +117,40 @@ void appendChromaHistogram(const cv::Mat& region, int bins, int first, int secon
     }
 }
 
+// Appends a `bins`-value histogram of gradient magnitudes from the Project 1 Sobel filters: how
+// much of the image is flat versus strongly edged.
+void appendSobelHistogram(const cv::Mat& frame, int bins, std::vector<float>& out) {
+    const std::size_t start = out.size();
+    out.resize(start + static_cast<std::size_t>(bins), 0.0f);
+
+    // Grayscale first: Sobel on one channel does a third of the work of three, and the magnitude
+    // is already the single channel the histogram needs
+    cv::Mat gray;
+    cv::Mat gradX;
+    cv::Mat gradY;
+    cv::Mat edgeGray;
+    cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
+    sobelX3x3(gray, gradX);
+    sobelY3x3(gray, gradY);
+    magnitude(gradX, gradY, edgeGray);  // CV_8UC1, clamped to 255
+
+    for (int r = 0; r < edgeGray.rows; r++) {
+        for (int c = 0; c < edgeGray.cols; c++) {
+            // Most pixels have weak gradients, so evenly spaced bins would put nearly everything
+            // in the first few. The square root spreads weak edges across more bins.
+            const float scaled = static_cast<float>(edgeGray.at<uchar>(r, c)) / 255.0f;
+            const int bin =
+                std::min(static_cast<int>(std::sqrt(scaled) * static_cast<float>(bins)), bins - 1);
+            out[start + static_cast<std::size_t>(bin)] += 1.0f;
+        }
+    }
+
+    const float total = static_cast<float>(edgeGray.rows) * static_cast<float>(edgeGray.cols);
+    for (std::size_t i = start; i < out.size(); i++) {
+        out[i] /= total;
+    }
+}
+
 // Appends a bins^3 RGB histogram of `region`. Keeps brightness, unlike chromaticity.
 void appendRgbHistogram(const cv::Mat& region, int bins, std::vector<float>& out) {
     const std::size_t start = out.size();
@@ -154,6 +191,25 @@ int histogram(const cv::Mat& frame, std::vector<float>& feature, int bins) {
 
     feature.clear();
     appendChromaHistogram(frame, bins, kRed, kGreen, feature);
+    return FEATURE_OK;
+}
+
+std::vector<std::size_t> textureColorLayout(int bins) {
+    return {static_cast<std::size_t>(bins) * static_cast<std::size_t>(bins),
+            static_cast<std::size_t>(bins)};
+}
+
+int textureColor(const cv::Mat& frame, std::vector<float>& feature, int bins) {
+    if (int rc = validateImage(frame); rc != FEATURE_OK) {
+        return rc;
+    }
+    if (bins <= 0) {
+        return FEATURE_ERR_BAD_BINS;
+    }
+
+    feature.clear();
+    appendChromaHistogram(frame, bins, kRed, kGreen, feature);
+    appendSobelHistogram(frame, bins, feature);
     return FEATURE_OK;
 }
 

@@ -9,6 +9,7 @@ constexpr const int DEFAULT_PATCH_SIZE = 7;
 constexpr const int DEFAULT_BIN_SIZE = 16;
 constexpr const char* DEFAULT_DATA_ROOT = "data";
 constexpr const char* DEFAULT_CSV_SUBDIR = "csv";
+constexpr const char* DEFAULT_IMAGE_SUBDIR = "olympus";
 
 // Fixed underlying type: keeps signedness identical across compilers
 enum FeatureStatus : int {
@@ -66,5 +67,15 @@ std::vector<std::size_t> multiHistogramLayout(int bins);
 // Each piece is normalized to sum to 1 on its own. centerSize follows the same rules as the
 // baseline's patch (positive, odd, no larger than the image).
 int multiHistogram(const cv::Mat& frame, std::vector<float>& feature, int bins, int centerSize);
+
+// Sizes of the pieces textureColor concatenates, in order: color, texture.
+std::vector<std::size_t> textureColorLayout(int bins);
+
+// Whole-image color and texture, concatenated:
+//   color    -> rg chromaticity histogram, bins*bins
+//   texture  -> histogram of Sobel gradient magnitudes of the grayscale image, bins values
+// Each piece is normalized to sum to 1 on its own, so the equally weighted metric treats them
+// the same however long they are.
+int textureColor(const cv::Mat& frame, std::vector<float>& feature, int bins);
 
 #endif

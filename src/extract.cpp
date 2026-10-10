@@ -111,14 +111,23 @@ int extractMultiHistogram(const std::vector<fs::path>& files, const fs::path& ro
     };
     return extractAll(files, root, compute, imagePaths, vectors, skipped);
 }
+
+int extractTextureColor(const std::vector<fs::path>& files, const fs::path& root, int bins,
+                        std::vector<std::string>& imagePaths,
+                        std::vector<std::vector<float>>& vectors, std::size_t& skipped) {
+    auto compute = [bins](const cv::Mat& img, std::vector<float>& out) {
+        return textureColor(img, out, bins);
+    };
+    return extractAll(files, root, compute, imagePaths, vectors, skipped);
+}
 }  // namespace
 
 int main(int argc, char** argv) {
     Args args;
     if (!args.parse(argc, argv)) {
         std::cerr << "usage: extract db=<dir> [root=data] "
-                     "[feature=baseline|histogram|multi_histogram] [patch=<odd size>] "
-                     "[bins=16] [out=<dir>]\n";
+                     "[feature=baseline|histogram|multi_histogram|texture_color] "
+                     "[patch=<odd size>] [bins=16] [out=<dir>]\n";
         return 1;
     }
 
@@ -215,6 +224,9 @@ int main(int argc, char** argv) {
             rc = extractMultiHistogram(files, root, bins, patchSize, imagePaths, vectors,
                                        skipped);
             break;
+        case FeatureType::TEXTURE_COLOR:
+            rc = extractTextureColor(files, root, bins, imagePaths, vectors, skipped);
+            break;
     }
     if (rc != FEATURE_OK) {
         std::cerr << featureErrorString(rc) << " (patch=" << patchSize << ", bins=" << bins
@@ -245,6 +257,9 @@ int main(int argc, char** argv) {
         case FeatureType::MULTI_HISTOGRAM:
             csvName = "multi_histogram_" + std::to_string(meta.bins) + "_c" +
                       std::to_string(meta.patch) + ".csv";
+            break;
+        case FeatureType::TEXTURE_COLOR:
+            csvName = "texture_color_" + std::to_string(meta.bins) + ".csv";
             break;
     }
 

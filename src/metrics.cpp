@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cmath>
 #include <stdexcept>
 
 namespace {
@@ -43,6 +44,27 @@ double multiIntersection(const std::vector<float>& a, const std::vector<float>& 
     }
     return total / static_cast<double>(chunks.size());
 }
+
+// 1 - cos(theta) = 1 - (a . b) / (|a| |b|), the same as normalizing both to unit length and
+// taking the dot product
+double cosineDistance(const std::vector<float>& a, const std::vector<float>& b) {
+    double dot = 0.0;
+    double normA = 0.0;
+    double normB = 0.0;
+    for (std::size_t i = 0; i < a.size(); i++) {
+        const double x = static_cast<double>(a[i]);
+        const double y = static_cast<double>(b[i]);
+        dot += x * y;
+        normA += x * x;
+        normB += y * y;
+    }
+    if (normA == 0.0 || normB == 0.0) {
+        return 1.0;  // a zero vector has no direction, so treat it as unrelated to everything
+    }
+    // Rounding can leave a vector's distance to itself at ~1e-16 or slightly negative; clamp so
+    // identical vectors report exactly 0
+    return std::max(0.0, 1.0 - dot / (std::sqrt(normA) * std::sqrt(normB)));
+}
 }  // namespace
 
 bool parseMetric(const std::string& name, Metric& out) {
@@ -56,6 +78,10 @@ bool parseMetric(const std::string& name, Metric& out) {
     }
     if (name == "multi") {
         out = Metric::MULTI;
+        return true;
+    }
+    if (name == "cosine") {
+        out = Metric::COSINE;
         return true;
     }
     return false;
@@ -73,6 +99,8 @@ double distance(Metric metric, const std::vector<float>& a, const std::vector<fl
         case Metric::MULTI:
             assert(!chunks.empty());
             return multiIntersection(a, b, chunks);
+        case Metric::COSINE:
+            return cosineDistance(a, b);
     }
     throw std::logic_error("unknown metric");
 }
