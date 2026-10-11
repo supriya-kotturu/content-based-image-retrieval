@@ -171,7 +171,8 @@ int main(int argc, char** argv) {
     if (!args.parse(argc, argv)) {
         std::cerr << "usage: extract db=<dir> [root=data] "
                      "[feature=baseline|histogram|multi_histogram|texture_color|orange_dnn] "
-                     "[patch=<odd size>] [bins=16] [dnn=<embeddings csv>] [out=<dir>]\n";
+                     "[patch=<odd size>] [bins=16] [dnn=<embeddings csv>] [out=<dir>] "
+                     "[append=0|1]\n";
         return 1;
     }
 
@@ -184,6 +185,7 @@ int main(int argc, char** argv) {
     std::string binsText = args.get("bins", std::to_string(DEFAULT_BIN_SIZE));
     std::string dnnCsv = args.get("dnn");  // only orange_dnn uses it
     std::string db = args.get("db");
+    std::string appendText = args.get("append", "0");
 
     if (db.empty()) {
         std::cerr << "db is required\n";
@@ -223,6 +225,12 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    if (appendText != "0" && appendText != "1") {
+        std::cerr << "invalid append: " << appendText << " (use 0 or 1)\n";
+        return 1;
+    }
+    const bool append = appendText == "1";
+
     // Report every unknown key, then abort once
     std::vector<std::string> unused = args.unusedKeys();
     if (!unused.empty()) {
@@ -250,52 +258,6 @@ int main(int argc, char** argv) {
         return 1;
     }
     std::cout << "found " << files.size() << " images" << std::endl;
-
-    std::vector<std::string> imagePaths;
-    std::vector<std::vector<float>> vectors;
-    std::size_t skipped = 0;
-
-    // Switched once per run: each case calls a batch function that owns the loop. No default,
-    // so adding a FeatureType triggers -Wswitch here.
-    int rc = FEATURE_ERR_BAD_TYPE;
-    switch (featureType) {
-        case FeatureType::BASELINE:
-            rc = extractBaseline(files, root, patchSize, imagePaths, vectors, skipped);
-            break;
-        case FeatureType::HISTOGRAM:
-            rc = extractHistogram(files, root, bins, imagePaths, vectors, skipped);
-            break;
-        case FeatureType::MULTI_HISTOGRAM:
-            rc = extractMultiHistogram(files, root, bins, patchSize, imagePaths, vectors,
-                                       skipped);
-            break;
-        case FeatureType::TEXTURE_COLOR:
-            rc = extractTextureColor(files, root, bins, imagePaths, vectors, skipped);
-            break;
-        case FeatureType::ORANGE_DNN: {
-            if (dnnCsv.empty()) {
-                std::cerr << "feature orange_dnn needs dnn=<embeddings csv>\n";
-                return 1;
-            }
-            std::map<std::string, std::vector<float>> embeddings;
-            if (loadEmbeddings(dnnCsv, embeddings) != 0) {
-                std::cerr << dnnCsv << ": cannot read the embeddings csv\n";
-                return 1;
-            }
-            rc = extractOrangeDnn(files, root, embeddings, imagePaths, vectors, skipped);
-            break;
-        }
-    }
-    if (rc != FEATURE_OK) {
-        std::cerr << featureErrorString(rc) << " (patch=" << patchSize << ", bins=" << bins
-                  << ")\n";
-        return 1;
-    }
-
-    if (vectors.empty()) {
-        std::cerr << "no image produced a feature; nothing to save\n";
-        return 1;
-    }
 
     // Filename derived from the config so it can't disagree with the meta
     FeatureMeta meta;
@@ -326,11 +288,115 @@ int main(int argc, char** argv) {
 
     std::string csvPath = (fs::path(outDir) / csvName).generic_string();
 
+    // append=1 reuses the rows already in the csv and computes only images that have none, so
+    // adding one image costs one image, not the whole folder. The csv name encodes bins/patch,
+    // so a loaded file was made with the same parameters.
+    std::map<std::string, std::vector<float>> existing;
+    if (append) {
+        FeatureMeta oldMeta;
+        std::vector<std::string> oldPaths;
+        std::vector<std::vector<float>> oldVectors;
+        StoreStatus loaded = loadFeatures(csvPath, oldMeta, oldPaths, oldVectors);
+        if (loaded == STORE_OK && oldMeta.feature == featureType) {
+            for (std::size_t i = 0; i < oldPaths.size(); i++) {
+                existing.emplace(oldPaths[i], std::move(oldVectors[i]));
+            }
+        } else if (loaded == STORE_ERR_NO_META || !fs::exists(csvPath)) {
+            std::cout << "append: no usable " << csvPath << " yet, extracting everything" << std::endl;
+        } else {
+            // A corrupt or mismatched file must not be silently extended
+            std::cerr << csvPath << ": cannot append to it (status " << loaded
+                      << "); run without append=1 to rebuild it\n";
+            return 1;
+        }
+    }
+
+    std::vector<fs::path> toCompute;
+    for (const fs::path& file : files) {
+        if (existing.count(fs::relative(file, root).generic_string()) == 0) {
+            toCompute.push_back(file);
+        }
+    }
+
+    std::vector<std::string> newPaths;
+    std::vector<std::vector<float>> newVectors;
+    std::size_t skipped = 0;
+
+    // Switched once per run: each case calls a batch function that owns the loop. No default,
+    // so adding a FeatureType triggers -Wswitch here.
+    int rc = FEATURE_OK;
+    if (!toCompute.empty()) {
+        switch (featureType) {
+            case FeatureType::BASELINE:
+                rc = extractBaseline(toCompute, root, patchSize, newPaths, newVectors, skipped);
+                break;
+            case FeatureType::HISTOGRAM:
+                rc = extractHistogram(toCompute, root, bins, newPaths, newVectors, skipped);
+                break;
+            case FeatureType::MULTI_HISTOGRAM:
+                rc = extractMultiHistogram(toCompute, root, bins, patchSize, newPaths, newVectors,
+                                           skipped);
+                break;
+            case FeatureType::TEXTURE_COLOR:
+                rc = extractTextureColor(toCompute, root, bins, newPaths, newVectors, skipped);
+                break;
+            case FeatureType::ORANGE_DNN: {
+                if (dnnCsv.empty()) {
+                    std::cerr << "feature orange_dnn needs dnn=<embeddings csv>\n";
+                    return 1;
+                }
+                std::map<std::string, std::vector<float>> embeddings;
+                if (loadEmbeddings(dnnCsv, embeddings) != 0) {
+                    std::cerr << dnnCsv << ": cannot read the embeddings csv\n";
+                    return 1;
+                }
+                rc = extractOrangeDnn(toCompute, root, embeddings, newPaths, newVectors, skipped);
+                break;
+            }
+        }
+    }
+    if (rc != FEATURE_OK) {
+        std::cerr << featureErrorString(rc) << " (patch=" << patchSize << ", bins=" << bins
+                  << ")\n";
+        return 1;
+    }
+
+    // Rebuilt in the folder's sorted order, so an appended csv is identical to a full run's.
+    // Rows for images no longer in the folder are dropped.
+    std::map<std::string, std::vector<float>> computed;
+    for (std::size_t i = 0; i < newPaths.size(); i++) {
+        computed.emplace(newPaths[i], std::move(newVectors[i]));
+    }
+    std::vector<std::string> imagePaths;
+    std::vector<std::vector<float>> vectors;
+    std::size_t kept = 0;
+    for (const fs::path& file : files) {
+        const std::string rel = fs::relative(file, root).generic_string();
+        if (auto it = existing.find(rel); it != existing.end()) {
+            imagePaths.push_back(rel);
+            vectors.push_back(std::move(it->second));
+            existing.erase(it);
+            kept++;
+        } else if (auto jt = computed.find(rel); jt != computed.end()) {
+            imagePaths.push_back(rel);
+            vectors.push_back(std::move(jt->second));
+        }
+    }
+
+    if (vectors.empty()) {
+        std::cerr << "no image produced a feature; nothing to save\n";
+        return 1;
+    }
+
     if (saveFeatures(csvPath, meta, imagePaths, vectors) != STORE_OK) {
         std::cerr << "failed to write " << csvPath << "\n";
         return 1;
     }
 
+    if (append) {
+        std::cout << "append: kept " << kept << ", computed " << computed.size() << ", dropped "
+                  << existing.size() << "\n";
+    }
     std::cout << "saved " << vectors.size() << " vectors to " << csvPath << " (" << skipped
               << " skipped)\n";
     return 0;
