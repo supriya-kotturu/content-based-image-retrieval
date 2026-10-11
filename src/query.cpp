@@ -1,5 +1,14 @@
+/*
+  Author:  Sai Supriya Kotturu
+  Date:    2026-10-06
+  Purpose: The query program: loads a feature file made by extract (or the provided ResNet18
+           embeddings), ranks every image by distance to a target image, prints the closest and
+           optionally the least similar, and shows them in a labelled, scrollable results window.
+*/
+
 #include <algorithm>
 #include <filesystem>
+#include <functional>
 #include <iostream>
 #include <opencv2/core/utils/logger.hpp>
 #include <opencv2/imgcodecs.hpp>
@@ -37,7 +46,8 @@ const char* storeErrorString(int status) {
     }
 }
 
-// Same feature function and patch the csv was built with, or the distances are meaningless
+// Same feature function and parameters (patch, bins) the csv was built with, or the distances are
+// meaningless
 int computeTarget(const FeatureMeta& meta, const cv::Mat& img, std::vector<float>& out) {
     switch (meta.feature) {
         case FeatureType::BASELINE:
@@ -48,17 +58,24 @@ int computeTarget(const FeatureMeta& meta, const cv::Mat& img, std::vector<float
             return multiHistogram(img, out, meta.bins, meta.patch);
         case FeatureType::TEXTURE_COLOR:
             return textureColor(img, out, meta.bins);
+        case FeatureType::ORANGE_DNN:
+            // Its embedding half cannot be computed here; prepareFromStore takes the whole
+            // vector from the target's own row instead
+            return FEATURE_ERR_NO_EMBEDDING;
     }
     return FEATURE_ERR_BAD_TYPE;
 }
 
-// Piece lengths of a concatenated vector; only MULTI uses them, others compare as one vector
+// Piece lengths of a concatenated vector; only the multi and custom metrics use them, the others
+// compare the whole vector
 std::vector<std::size_t> chunksFor(const FeatureMeta& meta) {
     switch (meta.feature) {
         case FeatureType::MULTI_HISTOGRAM:
             return multiHistogramLayout(meta.bins);
         case FeatureType::TEXTURE_COLOR:
             return textureColorLayout(meta.bins);
+        case FeatureType::ORANGE_DNN:
+            return orangeDnnLayout();
         case FeatureType::BASELINE:
         case FeatureType::HISTOGRAM:
             return {};
@@ -103,6 +120,14 @@ int prepareFromStore(const std::string& csv, const std::string& targetPath,
         return 1;
     }
 
+    // custom weights the embedding and orange pieces, so it needs exactly that layout, and that
+    // feature has no other meaningful metric
+    if ((metric == Metric::CUSTOM) != (meta.feature == FeatureType::ORANGE_DNN)) {
+        std::cerr << "metric custom and feature orange_dnn go together, but " << csv << " is "
+                  << featureTypeName(meta.feature) << " and metric is " << (metric == Metric::CUSTOM ? "custom" : "not custom") << "\n";
+        return 1;
+    }
+
     out.chunks = chunksFor(meta);
     std::size_t chunkTotal = 0;
     for (std::size_t length : out.chunks) {
@@ -114,16 +139,33 @@ int prepareFromStore(const std::string& csv, const std::string& targetPath,
         return 1;
     }
 
-    cv::Mat img = cv::imread(targetPath);
-    if (img.empty()) {
-        std::cerr << targetPath << ": could not read target image\n";
-        return 1;
-    }
+    if (meta.feature == FeatureType::ORANGE_DNN) {
+        // The embedding came from a file, so the target must be one of the extracted images
+        const std::string targetName = fs::path(targetPath).filename().generic_string();
+        bool found = false;
+        for (std::size_t i = 0; i < out.imagePaths.size(); i++) {
+            if (fs::path(out.imagePaths[i]).filename().generic_string() == targetName) {
+                out.target = out.vectors[i];
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            std::cerr << "target " << targetName << " not found in " << csv << "\n";
+            return 1;
+        }
+    } else {
+        cv::Mat img = cv::imread(targetPath);
+        if (img.empty()) {
+            std::cerr << targetPath << ": could not read target image\n";
+            return 1;
+        }
 
-    int rc = computeTarget(meta, img, out.target);
-    if (rc != FEATURE_OK) {
-        std::cerr << targetPath << ": " << featureErrorString(rc) << "\n";
-        return 1;
+        int rc = computeTarget(meta, img, out.target);
+        if (rc != FEATURE_OK) {
+            std::cerr << targetPath << ": " << featureErrorString(rc) << "\n";
+            return 1;
+        }
     }
 
     // Verified once here so distance() can assume equal lengths
@@ -143,6 +185,8 @@ int prepareFromStore(const std::string& csv, const std::string& targetPath,
     } else if (meta.feature == FeatureType::HISTOGRAM ||
                meta.feature == FeatureType::TEXTURE_COLOR) {
         settings << "  bins=" << meta.bins;
+    } else if (meta.feature == FeatureType::ORANGE_DNN) {
+        settings << "  embedding 0.7 + orange shade 0.3";
     } else {
         settings << "  bins=" << meta.bins << "  center=" << meta.patch << "x" << meta.patch;
     }
@@ -212,8 +256,9 @@ int main(int argc, char** argv) {
 
     Args args;
     if (!args.parse(argc, argv)) {
-        std::cerr << "usage: query csv=<file> target=<image> [metric=ssd|intersection|multi|cosine] "
-                     "[top=10] [root=data]\n"
+        std::cerr << "usage: query csv=<file> target=<image> "
+                     "[metric=ssd|intersection|multi|cosine|custom] [top=10] [worst=0] "
+                     "[root=data]\n"
                      "       query feature=dnn csv=<resnet csv> target=<name> [metric=ssd|cosine] "
                      "[db=data/olympus]\n";
         return 1;
@@ -223,6 +268,7 @@ int main(int argc, char** argv) {
     std::string targetPath = args.get("target");
     std::string metricName = args.get("metric", "ssd");
     std::string topText = args.get("top", "10");
+    std::string worstText = args.get("worst", "0");
     std::string root = args.get("root", DEFAULT_DATA_ROOT);
     // Only "dnn" is meaningful: every other feature is read from the csv's .meta
     std::string featureName = args.get("feature");
@@ -252,6 +298,18 @@ int main(int argc, char** argv) {
     }
     if (top <= 0) {
         std::cerr << "invalid top: " << topText << "\n";
+        return 1;
+    }
+
+    // How many of the least similar images to show too (0 = none)
+    int worst = -1;
+    try {
+        worst = std::stoi(worstText);
+    } catch (const std::exception&) {
+        worst = -1;
+    }
+    if (worst < 0) {
+        std::cerr << "invalid worst: " << worstText << "\n";
         return 1;
     }
 
@@ -308,10 +366,36 @@ int main(int argc, char** argv) {
         matchLabels.push_back(label.str());
     }
 
+    // The least similar images: a descending partial sort of a copy, so the top N above is kept.
+    // Rank counts from the bottom of the whole database (rank 1 = the single most different).
+    const std::size_t w = std::min<std::size_t>(static_cast<std::size_t>(worst), ranked.size());
+    if (w > 0) {
+        std::vector<std::pair<double, std::size_t>> farthest = ranked;
+        std::partial_sort(farthest.begin(), farthest.begin() + static_cast<std::ptrdiff_t>(w),
+                          farthest.end(), std::greater<>());
+        std::cout << "least similar:\n";
+        for (std::size_t r = 0; r < w; r++) {
+            const std::string& stored = imagePaths[farthest[r].second];
+            std::cout << "-" << r + 1 << "\t" << farthest[r].first << "\t" << stored << "\n";
+            matchedPaths.push_back((q.imageBase / stored).string());
+
+            std::ostringstream label;
+            label << "least similar #" << r + 1 << "\n"
+                  << fs::path(stored).filename().string() << "  dist " << farthest[r].first;
+            matchLabels.push_back(label.str());
+        }
+    }
+
     // Settings in the window so a screenshot for the report says how it was produced
     std::ostringstream title;
     title << q.settings << "  metric=" << metricName << "  top=" << n;
+    if (w > 0) {
+        title << "  + " << w << " least similar";
+    }
 
+    // showResults blocks until the window is closed; flush so piped or redirected output is
+    // visible before then
+    std::cout.flush();
     showResults(q.targetImage, matchedPaths, matchLabels, title.str(), 300);
     return 0;
 }

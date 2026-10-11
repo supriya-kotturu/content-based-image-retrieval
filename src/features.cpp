@@ -1,3 +1,11 @@
+/*
+  Author:  Sai Supriya Kotturu
+  Date:    2026-10-06
+  Purpose: Definitions of the feature extractors declared in features.h: the 7x7 baseline patch, the
+           rg chromaticity histogram, the multi-histogram, texture + color (Sobel magnitudes), and
+           the custom orange-mask feature. All pixel-level work for features lives here.
+*/
+
 #include <features.h>
 #include <sobel.h>
 
@@ -7,7 +15,8 @@
 #include <opencv2/imgproc.hpp>
 
 namespace {
-// Odd size so the patch has a true center pixel
+// Shared by baselineFeature and multiHistogram, which both take a centered square: the side must
+// be positive and odd (so a true center pixel exists) and the square must fit in the image
 int validatePatch(const cv::Mat& frame, int patchSize) {
     if (patchSize <= 0 || patchSize % 2 == 0) {
         return FEATURE_ERR_BAD_PATCH_SIZE;
@@ -43,6 +52,8 @@ const char* featureErrorString(int status) {
             return "image is smaller than patch size";
         case FEATURE_ERR_BAD_BINS:
             return "bins must be positive";
+        case FEATURE_ERR_NO_EMBEDDING:
+            return "no DNN embedding for this image";
         default:
             return "unknown error";
     }
@@ -118,7 +129,8 @@ void appendChromaHistogram(const cv::Mat& region, int bins, int first, int secon
 }
 
 // Appends a `bins`-value histogram of gradient magnitudes from the Project 1 Sobel filters: how
-// much of the image is flat versus strongly edged.
+// much of the image is flat versus strongly edged. The magnitude says how strong an edge is, not
+// which way it points. The filters leave a 1-pixel border at 0, which counts as flat.
 void appendSobelHistogram(const cv::Mat& frame, int bins, std::vector<float>& out) {
     const std::size_t start = out.size();
     out.resize(start + static_cast<std::size_t>(bins), 0.0f);
@@ -148,6 +160,54 @@ void appendSobelHistogram(const cv::Mat& frame, int bins, std::vector<float>& ou
     const float total = static_cast<float>(edgeGray.rows) * static_cast<float>(edgeGray.cols);
     for (std::size_t i = start; i < out.size(); i++) {
         out[i] /= total;
+    }
+}
+
+// The orange rule, tuned on the mask photos: hue 4 to 35 degrees, saturation and brightness
+// both at least 0.60. Saturation and brightness this high exclude wood and floors, which are the
+// same hue but duller (a looser rule matched the whole gallery of hardwood photos).
+constexpr float kOrangeHueMin = 4.0f;
+constexpr float kOrangeHueMax = 35.0f;
+constexpr float kOrangeMinSat = 0.60f;
+constexpr float kOrangeMinVal = 0.60f;
+
+// Appends ORANGE_BINS values: a hue x saturation histogram of the pixels the orange rule
+// accepts, normalized by the number of accepted pixels (so it describes the shade, not the area).
+void appendOrangeShadeHistogram(const cv::Mat& frame, std::vector<float>& out) {
+    const std::size_t start = out.size();
+    out.resize(start + static_cast<std::size_t>(ORANGE_BINS), 0.0f);
+
+    cv::Mat hsv;
+    cv::cvtColor(frame, hsv, cv::COLOR_BGR2HSV);  // OpenCV hue is 0..179, half of degrees
+
+    std::size_t counted = 0;
+    for (int r = 0; r < hsv.rows; r++) {
+        for (int c = 0; c < hsv.cols; c++) {
+            const cv::Vec3b px = hsv.at<cv::Vec3b>(r, c);
+            const float hue = static_cast<float>(px[0]) * 2.0f;
+            const float sat = static_cast<float>(px[1]) / 255.0f;
+            const float val = static_cast<float>(px[2]) / 255.0f;
+            if (hue < kOrangeHueMin || hue > kOrangeHueMax || sat < kOrangeMinSat ||
+                val < kOrangeMinVal) {
+                continue;
+            }
+            const int hueBin = std::min(
+                static_cast<int>((hue - kOrangeHueMin) / (kOrangeHueMax - kOrangeHueMin) *
+                                 static_cast<float>(ORANGE_HUE_BINS)),
+                ORANGE_HUE_BINS - 1);
+            const int satBin = std::min(
+                static_cast<int>((sat - kOrangeMinSat) / (1.0f - kOrangeMinSat) *
+                                 static_cast<float>(ORANGE_SAT_BINS)),
+                ORANGE_SAT_BINS - 1);
+            out[start + static_cast<std::size_t>(hueBin * ORANGE_SAT_BINS + satBin)] += 1.0f;
+            counted++;
+        }
+    }
+
+    if (counted > 0) {
+        for (std::size_t i = start; i < out.size(); i++) {
+            out[i] /= static_cast<float>(counted);
+        }
     }
 }
 
@@ -191,6 +251,24 @@ int histogram(const cv::Mat& frame, std::vector<float>& feature, int bins) {
 
     feature.clear();
     appendChromaHistogram(frame, bins, kRed, kGreen, feature);
+    return FEATURE_OK;
+}
+
+std::vector<std::size_t> orangeDnnLayout() {
+    return {static_cast<std::size_t>(DNN_LENGTH), static_cast<std::size_t>(ORANGE_BINS)};
+}
+
+int orangeDnnFeature(const cv::Mat& frame, const std::vector<float>& embedding,
+                     std::vector<float>& feature) {
+    if (int rc = validateImage(frame); rc != FEATURE_OK) {
+        return rc;
+    }
+    if (embedding.size() != static_cast<std::size_t>(DNN_LENGTH)) {
+        return FEATURE_ERR_NO_EMBEDDING;
+    }
+
+    feature = embedding;
+    appendOrangeShadeHistogram(frame, feature);
     return FEATURE_OK;
 }
 

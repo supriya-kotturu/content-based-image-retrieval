@@ -1,15 +1,16 @@
 /*
   Author:  Sai Supriya Kotturu
-  Date:    2026-09-21
-  Purpose: Sobel X, Sobel Y and gradient magnitude, copied from Project 1's filters.cpp and
-           generalized to work on 1-channel (grayscale) as well as 3-channel (BGR) images
+  Date:    2026-10-10
+  Purpose: Sobel X, Sobel Y and gradient magnitude, copied from Project 1's filters.cpp (written
+           2026-09-21) and generalized to work on 1-channel (grayscale) as well as 3-channel
+           (BGR) images. Used for the texture histogram in features.cpp.
 */
 
 #include <sobel.h>
 
 #include <cmath>
 
-// Sobel X (project 1 - task 7) as separable 1x3 filters, positive to the right. src is CV_8UC1
+// Sobel X (Project 1, task 7) as separable 1x3 filters, positive to the right. src is CV_8UC1
 // or CV_8UC3, dest becomes CV_16SC1 or CV_16SC3 in [-255, 255]. Returns 0 on success.
 int sobelX3x3(cv::Mat& src, cv::Mat& dest) {
     // 1 channel (grayscale) or 3 channels (BGR)
@@ -73,7 +74,7 @@ int sobelX3x3(cv::Mat& src, cv::Mat& dest) {
     return 0;
 }
 
-// Sobel Y (project 1 - task 7) as separable 1x3 filters, positive up. src is CV_8UC1 or
+// Sobel Y (Project 1, task 7) as separable 1x3 filters, positive up. src is CV_8UC1 or
 // CV_8UC3, dest becomes CV_16SC1 or CV_16SC3 in [-255, 255]. Returns 0 on success.
 int sobelY3x3(cv::Mat& src, cv::Mat& dest) {
     // 1 channel (grayscale) or 3 channels (BGR)
@@ -137,7 +138,7 @@ int sobelY3x3(cv::Mat& src, cv::Mat& dest) {
     return 0;
 }
 
-// Gradient magnitude (task 8): per channel sqrt(sx^2 + sy^2), clamped to 255.
+// Gradient magnitude (Project 1, task 8): per channel sqrt(sx^2 + sy^2), clamped to 255.
 // sx/sy are CV_16SC1 or CV_16SC3 Sobel outputs of the same type, dest becomes CV_8UC1 or
 // CV_8UC3. Returns 0 on success.
 int magnitude(cv::Mat& sx, cv::Mat& sy, cv::Mat& dest) {

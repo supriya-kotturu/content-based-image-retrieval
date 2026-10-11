@@ -1,3 +1,11 @@
+/*
+  Author:  Sai Supriya Kotturu
+  Date:    2026-10-06
+  Purpose: Definitions of saveFeatures/loadFeatures and the .meta file they keep beside every
+           feature csv: which feature made it, its parameters, and its row and vector counts,
+           checked against the csv on load. The csv itself stays in csv_util's format.
+*/
+
 #include <csv_util.h>
 #include <feature_store.h>
 
@@ -6,6 +14,7 @@
 #include <string>
 
 namespace {
+// Key names as written in the .meta file (key=value per line); renaming one breaks old files
 constexpr const char* KEY_FEATURE = "feature";
 constexpr const char* KEY_PATCH = "patch";
 constexpr const char* KEY_ROWS = "rows";
@@ -17,11 +26,13 @@ void writeKV(std::ostream& out, const char* key, const T& value) {
     out << key << '=' << value << '\n';
 }
 
-// Return the Meta Filename for the .csv file
+// The .meta path for a csv: same folder and name, with the extension swapped
 std::string metaPathFor(const std::string& csvPath) {
     return std::filesystem::path(csvPath).replace_extension(".meta").string();
 }
 
+// Parses key=value lines into `meta`. Unknown keys are ignored; the keys the feature needs (see
+// FeatureMeta) must all be present, so a typo or a deleted line is an error, not a silent default.
 StoreStatus readMeta(const std::string& metaPath, FeatureMeta& meta) {
     if (!std::filesystem::exists(metaPath)) {
         return STORE_ERR_NO_META;
@@ -80,15 +91,18 @@ StoreStatus readMeta(const std::string& metaPath, FeatureMeta& meta) {
         case FeatureType::HISTOGRAM:
             return seenBins ? STORE_OK : STORE_ERR_BAD_META;
         case FeatureType::MULTI_HISTOGRAM:
-            // bins sizes the chromaticity pieces, patch is the centre square's side
+            // bins sizes the chromaticity pieces, patch is the center square's side
             return (seenBins && seenPatch) ? STORE_OK : STORE_ERR_BAD_META;
         case FeatureType::TEXTURE_COLOR:
             return seenBins ? STORE_OK : STORE_ERR_BAD_META;
+        case FeatureType::ORANGE_DNN:
+            return STORE_OK;  // fixed layout, no parameters
     }
 
     return STORE_ERR_BAD_META;
 }
 
+// Writes only the parameters the feature uses, matching what readMeta requires
 StoreStatus writeMeta(const std::string& metaPath, const FeatureMeta& meta) {
     std::ofstream out(metaPath, std::ios::out | std::ios::trunc);
     if (!out) {
@@ -113,6 +127,8 @@ StoreStatus writeMeta(const std::string& metaPath, const FeatureMeta& meta) {
         case FeatureType::TEXTURE_COLOR:
             writeKV(out, KEY_BINS, meta.bins);
             break;
+        case FeatureType::ORANGE_DNN:
+            break;
     }
 
     out.flush();
@@ -134,6 +150,9 @@ StoreStatus parseFeatureType(const std::string& name, FeatureType& out) {
     } else if (name == "texture_color") {
         out = FeatureType::TEXTURE_COLOR;
         return STORE_OK;
+    } else if (name == "orange_dnn") {
+        out = FeatureType::ORANGE_DNN;
+        return STORE_OK;
     }
     return STORE_ERR_UNKNOWN_FEATURE;
 }
@@ -148,6 +167,8 @@ const char* featureTypeName(FeatureType type) {
             return "multi_histogram";
         case FeatureType::TEXTURE_COLOR:
             return "texture_color";
+        case FeatureType::ORANGE_DNN:
+            return "orange_dnn";
     }
     // No default above so -Wswitch flags a new enumerator; this covers out-of-range values
     return "unknown feature type";

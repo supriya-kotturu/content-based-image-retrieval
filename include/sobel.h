@@ -1,3 +1,10 @@
+/*
+  Author:  Sai Supriya Kotturu
+  Date:    2026-10-10
+  Purpose: Declares the Sobel X, Sobel Y and gradient magnitude filters carried over from
+           Project 1, for grayscale or BGR 8-bit images.
+*/
+
 #ifndef SOBEL_H
 #define SOBEL_H
 

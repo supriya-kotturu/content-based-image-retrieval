@@ -1,13 +1,23 @@
+/*
+  Author:  Sai Supriya Kotturu
+  Date:    2026-10-06
+  Purpose: The extract program: computes one feature vector for every image in a folder and saves
+           them, with a .meta describing the feature, for query to rank against. Offline step of
+           the two-program pipeline, run once per feature and parameter setting.
+*/
+
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
 #include <functional>
 #include <iostream>
+#include <map>
 #include <opencv2/imgcodecs.hpp>
 #include <string>
 #include <vector>
 
 #include "common.h"
+#include "csv_util.h"
 #include "feature_store.h"
 #include "features.h"
 
@@ -45,11 +55,13 @@ int listImages(const fs::path& dir, std::vector<fs::path>& files) {
     return 0;
 }
 
-using FeatureFn = std::function<int(const cv::Mat&, std::vector<float>&)>;
+// The file is passed too, for features that need more than pixels (the embedding is looked up by
+// filename)
+using FeatureFn = std::function<int(const fs::path&, const cv::Mat&, std::vector<float>&)>;
 
 // The loop every per-image feature shares: read, compute, skip failures, store root-relative
-// names. Returns FEATURE_ERR_BAD_PATCH_SIZE (a config error, identical for every image) to abort
-// the run; any other per-image failure is skipped and counted.
+// names. Returns FEATURE_ERR_BAD_PATCH_SIZE or FEATURE_ERR_BAD_BINS (config errors, identical for
+// every image) to abort the run; any other per-image failure is skipped and counted.
 int extractAll(const std::vector<fs::path>& files, const fs::path& root, const FeatureFn& compute,
                std::vector<std::string>& imagePaths, std::vector<std::vector<float>>& vectors,
                std::size_t& skipped) {
@@ -62,7 +74,7 @@ int extractAll(const std::vector<fs::path>& files, const fs::path& root, const F
         }
 
         std::vector<float> vec;
-        int rc = compute(img, vec);
+        int rc = compute(files[i], img, vec);
         // Config errors are identical for every image, so retrying the rest is pointless
         if (rc == FEATURE_ERR_BAD_PATCH_SIZE || rc == FEATURE_ERR_BAD_BINS) {
             return rc;
@@ -88,7 +100,7 @@ int extractAll(const std::vector<fs::path>& files, const fs::path& root, const F
 int extractBaseline(const std::vector<fs::path>& files, const fs::path& root, int patchSize,
                     std::vector<std::string>& imagePaths, std::vector<std::vector<float>>& vectors,
                     std::size_t& skipped) {
-    auto compute = [patchSize](const cv::Mat& img, std::vector<float>& out) {
+    auto compute = [patchSize](const fs::path&, const cv::Mat& img, std::vector<float>& out) {
         return baselineFeature(img, out, patchSize);
     };
     return extractAll(files, root, compute, imagePaths, vectors, skipped);
@@ -97,7 +109,7 @@ int extractBaseline(const std::vector<fs::path>& files, const fs::path& root, in
 int extractHistogram(const std::vector<fs::path>& files, const fs::path& root, int bins,
                      std::vector<std::string>& imagePaths, std::vector<std::vector<float>>& vectors,
                      std::size_t& skipped) {
-    auto compute = [bins](const cv::Mat& img, std::vector<float>& out) {
+    auto compute = [bins](const fs::path&, const cv::Mat& img, std::vector<float>& out) {
         return histogram(img, out, bins);
     };
     return extractAll(files, root, compute, imagePaths, vectors, skipped);
@@ -106,7 +118,8 @@ int extractHistogram(const std::vector<fs::path>& files, const fs::path& root, i
 int extractMultiHistogram(const std::vector<fs::path>& files, const fs::path& root, int bins,
                           int centerSize, std::vector<std::string>& imagePaths,
                           std::vector<std::vector<float>>& vectors, std::size_t& skipped) {
-    auto compute = [bins, centerSize](const cv::Mat& img, std::vector<float>& out) {
+    auto compute = [bins, centerSize](const fs::path&, const cv::Mat& img,
+                                      std::vector<float>& out) {
         return multiHistogram(img, out, bins, centerSize);
     };
     return extractAll(files, root, compute, imagePaths, vectors, skipped);
@@ -115,8 +128,38 @@ int extractMultiHistogram(const std::vector<fs::path>& files, const fs::path& ro
 int extractTextureColor(const std::vector<fs::path>& files, const fs::path& root, int bins,
                         std::vector<std::string>& imagePaths,
                         std::vector<std::vector<float>>& vectors, std::size_t& skipped) {
-    auto compute = [bins](const cv::Mat& img, std::vector<float>& out) {
+    auto compute = [bins](const fs::path&, const cv::Mat& img, std::vector<float>& out) {
         return textureColor(img, out, bins);
+    };
+    return extractAll(files, root, compute, imagePaths, vectors, skipped);
+}
+
+// The provided embeddings file: bare filename, then DNN_LENGTH values per row, keyed by filename
+int loadEmbeddings(const std::string& path, std::map<std::string, std::vector<float>>& out) {
+    std::string pathCopy = path;
+    std::vector<char*> names;
+    std::vector<std::vector<float>> rows;
+    if (read_image_data_csv(pathCopy.data(), names, rows) != 0) {
+        return -1;
+    }
+    for (std::size_t i = 0; i < names.size(); i++) {
+        out[fs::path(names[i]).filename().generic_string()] = rows[i];
+        delete[] names[i];
+    }
+    return 0;
+}
+
+int extractOrangeDnn(const std::vector<fs::path>& files, const fs::path& root,
+                     const std::map<std::string, std::vector<float>>& embeddings,
+                     std::vector<std::string>& imagePaths,
+                     std::vector<std::vector<float>>& vectors, std::size_t& skipped) {
+    auto compute = [&embeddings](const fs::path& file, const cv::Mat& img,
+                                 std::vector<float>& out) {
+        auto it = embeddings.find(file.filename().generic_string());
+        if (it == embeddings.end()) {
+            return static_cast<int>(FEATURE_ERR_NO_EMBEDDING);
+        }
+        return orangeDnnFeature(img, it->second, out);
     };
     return extractAll(files, root, compute, imagePaths, vectors, skipped);
 }
@@ -126,8 +169,8 @@ int main(int argc, char** argv) {
     Args args;
     if (!args.parse(argc, argv)) {
         std::cerr << "usage: extract db=<dir> [root=data] "
-                     "[feature=baseline|histogram|multi_histogram|texture_color] "
-                     "[patch=<odd size>] [bins=16] [out=<dir>]\n";
+                     "[feature=baseline|histogram|multi_histogram|texture_color|orange_dnn] "
+                     "[patch=<odd size>] [bins=16] [dnn=<embeddings csv>] [out=<dir>]\n";
         return 1;
     }
 
@@ -138,6 +181,7 @@ int main(int argc, char** argv) {
     std::string featureName = args.get("feature", "baseline");
     std::string patchText = args.get("patch");  // empty = use the feature's own default
     std::string binsText = args.get("bins", std::to_string(DEFAULT_BIN_SIZE));
+    std::string dnnCsv = args.get("dnn");  // only orange_dnn uses it
     std::string db = args.get("db");
 
     if (db.empty()) {
@@ -153,7 +197,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // `patch` means the baseline's patch side or the multi histogram's centre side, and the
+    // `patch` means the baseline's patch side or the multi histogram's center side, and the
     // sensible default differs: 7 pixels is a fine patch but a useless histogram region
     if (patchText.empty()) {
         patchText = std::to_string(featureType == FeatureType::MULTI_HISTOGRAM
@@ -227,6 +271,19 @@ int main(int argc, char** argv) {
         case FeatureType::TEXTURE_COLOR:
             rc = extractTextureColor(files, root, bins, imagePaths, vectors, skipped);
             break;
+        case FeatureType::ORANGE_DNN: {
+            if (dnnCsv.empty()) {
+                std::cerr << "feature orange_dnn needs dnn=<embeddings csv>\n";
+                return 1;
+            }
+            std::map<std::string, std::vector<float>> embeddings;
+            if (loadEmbeddings(dnnCsv, embeddings) != 0) {
+                std::cerr << dnnCsv << ": cannot read the embeddings csv\n";
+                return 1;
+            }
+            rc = extractOrangeDnn(files, root, embeddings, imagePaths, vectors, skipped);
+            break;
+        }
     }
     if (rc != FEATURE_OK) {
         std::cerr << featureErrorString(rc) << " (patch=" << patchSize << ", bins=" << bins
@@ -260,6 +317,9 @@ int main(int argc, char** argv) {
             break;
         case FeatureType::TEXTURE_COLOR:
             csvName = "texture_color_" + std::to_string(meta.bins) + ".csv";
+            break;
+        case FeatureType::ORANGE_DNN:
+            csvName = "orange_dnn.csv";
             break;
     }
 

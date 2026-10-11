@@ -1,3 +1,9 @@
+/*
+  Author:  Sai Supriya Kotturu
+  Date:    2026-10-06
+  Purpose: Definitions of the Args methods declared in common.h.
+*/
+
 #include <common.h>
 
 bool Args::parse(int argc, char** argv) {

@@ -1,3 +1,11 @@
+/*
+  Author:  Sai Supriya Kotturu
+  Date:    2026-10-06
+  Purpose: Draws the query results window: the target and its matches on a dark canvas, wrapped
+           into a grid with a label under each image, shown through a vertically scrollable
+           viewport (OpenCV's highgui has no scrollbars of its own).
+*/
+
 #include <display.h>
 
 #include <algorithm>
@@ -102,7 +110,6 @@ void scrollView(const std::string& windowName, const cv::Mat& canvas) {
         if (key == 'q' || key == 27) {
             break;
         }
-        // Windows virtual-key codes as returned by waitKeyEx
         if (key == kKeyUp) {
             scrollBy(state, -kScrollStep);
         } else if (key == kKeyDown) {

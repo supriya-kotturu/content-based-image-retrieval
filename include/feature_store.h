@@ -1,3 +1,11 @@
+/*
+  Author:  Sai Supriya Kotturu
+  Date:    2026-10-06
+  Purpose: Declares FeatureType, FeatureMeta and saveFeatures/loadFeatures: how extract writes a
+           feature file (a csv plus a .meta describing it) and how query reads it back and checks
+           that the two agree.
+*/
+
 #ifndef FEATURE_STORE_H
 #define FEATURE_STORE_H
 
@@ -18,7 +26,7 @@ enum StoreStatus : int {
     STORE_ERR_UNKNOWN_FEATURE = -5,  // feature name not recognized
 };
 
-enum class FeatureType { BASELINE, HISTOGRAM, MULTI_HISTOGRAM, TEXTURE_COLOR };
+enum class FeatureType { BASELINE, HISTOGRAM, MULTI_HISTOGRAM, TEXTURE_COLOR, ORANGE_DNN };
 
 // Parses the on-disk / command-line spelling (e.g. "baseline") into `out`.
 // Returns STORE_OK or STORE_ERR_UNKNOWN_FEATURE; `out` is untouched on failure. The caller
@@ -32,12 +40,19 @@ const char* featureTypeName(FeatureType type);
 // Describes how a stored CSV was produced, so query can compute the target's vector the same way.
 // Lives in a .meta file beside the CSV rather than in the CSV itself, which keeps csv_util's
 // format untouched and the file readable in Excel / pandas.
+//
+// Only the parameters a feature uses are written and required:
+//   baseline         patch (side of the center square)
+//   histogram        bins (per axis)
+//   multi_histogram  bins and patch (side of the center square)
+//   texture_color    bins
+//   orange_dnn       none (fixed layout)
 struct FeatureMeta {
     FeatureType feature = FeatureType::BASELINE;
     int patch = DEFAULT_PATCH_SIZE;
     int bins = DEFAULT_BIN_SIZE;
-    std::size_t rows = 0;
-    std::size_t vectorLength = 0;
+    std::size_t rows = 0;          // number of images
+    std::size_t vectorLength = 0;  // values per image
 };
 
 // Writes imagePaths/vectors to csvPath and the config to the same-stem .meta beside it.
