@@ -9,11 +9,15 @@
 #include <csv_util.h>
 #include <feature_store.h>
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <thread>
 
 namespace {
+namespace fs = std::filesystem;
+
 // Key names as written in the .meta file (key=value per line); renaming one breaks old files
 constexpr const char* KEY_FEATURE = "feature";
 constexpr const char* KEY_PATCH = "patch";
@@ -28,7 +32,27 @@ void writeKV(std::ostream& out, const char* key, const T& value) {
 
 // The .meta path for a csv: same folder and name, with the extension swapped
 std::string metaPathFor(const std::string& csvPath) {
-    return std::filesystem::path(csvPath).replace_extension(".meta").string();
+    return fs::path(csvPath).replace_extension(".meta").string();
+}
+
+std::string tmpPathFor(const std::string& path) {
+    return path + ".tmp";
+}
+
+// Renaming over the old file swaps it in one step, so a reader sees the old file or the new one,
+// never a half-written one. Windows refuses to replace a file another process has open (a query
+// reading the csv), so retry for a few seconds before giving up.
+bool replaceFile(const std::string& from, const std::string& to) {
+    constexpr int kAttempts = 50;
+    for (int attempt = 0; attempt < kAttempts; attempt++) {
+        std::error_code ec;
+        fs::rename(from, to, ec);
+        if (!ec) {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    return false;
 }
 
 // Parses key=value lines into `meta`. Unknown keys are ignored; the keys the feature needs (see
@@ -187,24 +211,23 @@ StoreStatus saveFeatures(const std::string& csvPath, const FeatureMeta& meta,
         }
     }
 
-    std::filesystem::path parent = std::filesystem::path(csvPath).parent_path();
+    fs::path parent = fs::path(csvPath).parent_path();
     std::error_code ec;
     if (!parent.empty()) {
-        std::filesystem::create_directories(parent, ec);
+        fs::create_directories(parent, ec);
         if (ec) {
             return STORE_ERR_IO;
         }
     }
 
-    // Drop the old meta first so a crash mid-write can't leave a stale meta blessing a partial CSV
+    // Both files are written in full under .tmp names and then swapped in, so a concurrent query
+    // keeps reading the previous version instead of a partial one
     const std::string metaPath = metaPathFor(csvPath);
-    std::filesystem::remove(metaPath, ec);
-    if (ec) {
-        return STORE_ERR_IO;
-    }
+    const std::string csvTmp = tmpPathFor(csvPath);
+    const std::string metaTmp = tmpPathFor(metaPath);
 
     // csv_util takes non-const char*, so work on copies
-    std::string csvCopy = csvPath;
+    std::string csvCopy = csvTmp;
     for (std::size_t idx = 0; idx < imagePaths.size(); idx++) {
         std::string pathCopy = imagePaths[idx];
         std::vector<float> rowCopy = vectors[idx];
@@ -215,16 +238,27 @@ StoreStatus saveFeatures(const std::string& csvPath, const FeatureMeta& meta,
         }
     }
 
-    // Written last: a meta that exists means the CSV is complete
     FeatureMeta finalMeta = meta;
     finalMeta.rows = vectors.size();
     finalMeta.vectorLength = vectorLength;
-    return writeMeta(metaPath, finalMeta);
+    StoreStatus status = writeMeta(metaTmp, finalMeta);
+    if (status != STORE_OK) {
+        return status;
+    }
+
+    // The pair can't be swapped in one step. csv first, meta last: between the two renames (or
+    // after a crash there) the row counts disagree, which loadFeatures reports as a mismatch
+    // rather than trusting a stale meta.
+    if (!replaceFile(csvTmp, csvPath) || !replaceFile(metaTmp, metaPath)) {
+        return STORE_ERR_IO;
+    }
+    return STORE_OK;
 }
 
-StoreStatus loadFeatures(const std::string& csvPath, FeatureMeta& meta,
-                         std::vector<std::string>& imagePaths,
-                         std::vector<std::vector<float>>& vectors) {
+namespace {
+StoreStatus loadOnce(const std::string& csvPath, FeatureMeta& meta,
+                     std::vector<std::string>& imagePaths,
+                     std::vector<std::vector<float>>& vectors) {
     imagePaths.clear();
     vectors.clear();
 
@@ -259,4 +293,21 @@ StoreStatus loadFeatures(const std::string& csvPath, FeatureMeta& meta,
     }
 
     return STORE_OK;
+}
+}  // namespace
+
+StoreStatus loadFeatures(const std::string& csvPath, FeatureMeta& meta,
+                         std::vector<std::string>& imagePaths,
+                         std::vector<std::vector<float>>& vectors) {
+    // A mismatch can be transient: saveFeatures swaps the csv and its meta with two renames, and
+    // a read can land between them. Only a mismatch that persists is a real error.
+    constexpr int kAttempts = 4;
+    StoreStatus status = STORE_ERR_MISMATCH;
+    for (int attempt = 0; attempt < kAttempts && status == STORE_ERR_MISMATCH; attempt++) {
+        if (attempt > 0) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(150));
+        }
+        status = loadOnce(csvPath, meta, imagePaths, vectors);
+    }
+    return status;
 }

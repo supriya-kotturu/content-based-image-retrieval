@@ -63,9 +63,10 @@ struct FeatureMeta {
 // disagree with the CSV. `imagePaths` are stored as given (the caller makes them relative to the
 // data root and normalized); each must be shorter than 256 chars (csv_util's buffer).
 //
-// Order matters: creates the parent directory, deletes any old .meta, writes the CSV, and writes
-// the new .meta last. A .meta that exists therefore means a completed write; a crash leaves a CSV
-// with no meta, which loadFeatures refuses. Truncates an existing CSV.
+// Atomic per file: the CSV and .meta are written in full as <name>.tmp, then renamed over the old
+// ones (CSV first, .meta last), so a concurrent reader sees the previous version or the new one,
+// never a partial file. Between the two renames the pair disagrees on row count, which
+// loadFeatures retries through. On Windows a rename blocked by an open reader is retried for ~5 s.
 // Returns STORE_OK or STORE_ERR_IO.
 [[nodiscard]] StoreStatus saveFeatures(const std::string& csvPath, const FeatureMeta& meta,
                                        const std::vector<std::string>& imagePaths,
@@ -75,7 +76,8 @@ struct FeatureMeta {
 // imagePaths and vectors. The output parameters are cleared first and unspecified on failure.
 //
 // Verifies that every row's length equals meta.vectorLength and the row count equals meta.rows,
-// so a CSV paired with the wrong meta fails here and not later in the distance loop.
+// so a CSV paired with the wrong meta fails here and not later in the distance loop. A mismatch is
+// retried a few times (~0.5 s) first, since one can appear briefly while saveFeatures swaps files.
 // Moving or renaming the CSV without its .meta yields STORE_ERR_NO_META.
 // Returns STORE_OK, STORE_ERR_IO, STORE_ERR_NO_META, STORE_ERR_BAD_META, STORE_ERR_MISMATCH or
 // STORE_ERR_UNKNOWN_FEATURE.
