@@ -2,7 +2,7 @@
 
 The web UI runs on Netlify as a **read-only search demo**. Every feature and metric works on the 1,106
 database images, and so does searching with a one-off uploaded image. Adding images to the database is
-switched off. Site: `cbir-studio-skotturu` → <https://cbir-studio-skotturu.netlify.app>.
+switched off. Site: `content-based-image-retrieval` → <https://content-based-image-retrieval.netlify.app>.
 
 Each step below names the script that does it and the check that proves it worked. Three scripts in
 `deploy/` do the work. Run them in Git Bash from the project root.
@@ -102,7 +102,8 @@ Both folders are gitignored build output. Re-run the script after re-extracting 
 
 ## 5. Configure the Netlify site (once)
 
-Already done for `cbir-studio-skotturu`. For a new site:
+Already done for `content-based-image-retrieval`. For a new site (or `netlify api updateSite` to rename
+one: the name is the `*.netlify.app` subdomain and must be globally unique):
 
 ```
 cd web
