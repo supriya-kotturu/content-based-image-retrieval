@@ -17,12 +17,12 @@ import { UploadDropzone } from "@/components/upload-dropzone";
 import { ResultGrid } from "@/components/result-grid";
 import { ReindexBanner } from "@/components/reindex-banner";
 import { useReindex } from "@/hooks/use-reindex";
-import { ApiError, fetchCatalog, postFiles, postJson } from "@/lib/api";
-import { METRIC_LABEL, type DbImage, type FeatureInfo, type Match, type Metric, type QueryResponse } from "@/lib/compat";
+import { fetchCatalog, postFiles, postJson } from "@/lib/api";
+import { METRIC_LABEL, isUsable, type DbImage, type FeatureInfo, type Match, type Metric, type QueryResponse } from "@/lib/compat";
 
-type Target =
-  | { kind: "db"; id: string; url: string; hasEmbedding: boolean }
-  | { kind: "temp"; id: string; url: string; hasEmbedding: false; fileName: string };
+// Only which image is selected; what it's indexed in is derived from the latest image list, so it
+// updates by itself when a re-index finishes
+type Target = { kind: "db"; id: string; url: string } | { kind: "temp"; id: string; url: string; fileName: string };
 
 function sliderValue(v: number | readonly number[]): number {
   return Array.isArray(v) ? v[0] : (v as number);
@@ -43,7 +43,7 @@ export function SearchView() {
   const [result, setResult] = useState<QueryResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const { status, refresh } = useReindex(() => {
+  const { status } = useReindex(() => {
     fetchCatalog()
       .then((c) => {
         setFeatures(c.features);
@@ -61,14 +61,21 @@ export function SearchView() {
         setFeatures(c.features);
         setImages(c.images);
         const img = c.images.find((i) => i.name === initialTarget);
-        if (img) setTarget({ kind: "db", id: img.name, url: img.url, hasEmbedding: img.hasEmbedding });
+        if (img) setTarget({ kind: "db", id: img.name, url: img.url });
       })
       .catch((e) => toast.error(`Could not load: ${e.message}`));
   }, [initialTarget]);
 
+  // A one-off upload has no row anywhere; a database image has rows wherever the csvs say so
+  const targetMissing = useMemo(() => {
+    if (!target) return null;
+    if (target.kind === "temp") return features.map((f) => f.id);
+    return images.find((i) => i.name === target.id)?.missing ?? [];
+  }, [target, images, features]);
+
   const usable = useCallback(
-    (f: FeatureInfo) => !f.needsEmbedding || (target?.hasEmbedding ?? true),
-    [target],
+    (f: FeatureInfo) => isUsable(f, targetMissing ? { missing: targetMissing } : null),
+    [targetMissing],
   );
 
   // Derived, not synced: the user's choice wins while it's valid for the current target, otherwise
@@ -110,7 +117,6 @@ export function SearchView() {
     } catch (e) {
       const msg = (e as Error).message;
       setError(msg);
-      if (e instanceof ApiError && e.status === 409) void refresh();
       toast.error(msg);
     } finally {
       setRunning(false);
@@ -121,7 +127,7 @@ export function SearchView() {
     setUploading(true);
     try {
       const { id, url } = await postFiles<{ id: string; url: string }>("/api/targets", "file", files);
-      setTarget({ kind: "temp", id, url, hasEmbedding: false, fileName: files[0].name });
+      setTarget({ kind: "temp", id, url, fileName: files[0].name });
       setResult(null);
     } catch (e) {
       toast.error((e as Error).message);
@@ -133,7 +139,7 @@ export function SearchView() {
   const useMatchAsTarget = (m: Match) => {
     const img = images.find((i) => i.name === m.name);
     if (!img) return;
-    const t: Target = { kind: "db", id: img.name, url: img.url, hasEmbedding: img.hasEmbedding };
+    const t: Target = { kind: "db", id: img.name, url: img.url };
     setTarget(t);
     setTab("db");
     void run(t);
@@ -145,8 +151,11 @@ export function SearchView() {
     return Math.max(...result.matches.map((m) => m.distance), ...result.worst.map((m) => m.distance), 0);
   }, [result]);
 
-  const reindexing = status?.running ?? false;
   const blockedFeatures = features.filter((f) => !usable(f));
+  const pendingIndexes = target?.kind === "db" ? (targetMissing ?? []).filter((id) => {
+    const f = features.find((x) => x.id === id);
+    return f && !f.targetFromIndex;
+  }) : [];
 
   return (
     <div className="space-y-6">
@@ -179,7 +188,7 @@ export function SearchView() {
                   images={images}
                   selected={target?.kind === "db" ? target.id : null}
                   onSelect={(img) => {
-                    setTarget({ kind: "db", id: img.name, url: img.url, hasEmbedding: img.hasEmbedding });
+                    setTarget({ kind: "db", id: img.name, url: img.url });
                     setResult(null);
                   }}
                 />
@@ -268,11 +277,11 @@ export function SearchView() {
             <Button
               size="lg"
               className="w-full bg-brand text-brand-foreground hover:bg-brand/90"
-              disabled={!target || !feature || !metric || running || reindexing}
+              disabled={!target || !feature || !metric || running}
               onClick={() => run()}
             >
               {running ? <Loader2Icon className="animate-spin" /> : <SparklesIcon />}
-              {reindexing ? "Waiting for re-index…" : running ? "Ranking…" : "Find similar images"}
+              {running ? "Ranking…" : "Find similar images"}
             </Button>
           </section>
         </aside>
@@ -309,7 +318,14 @@ export function SearchView() {
                     </Tooltip>
                   </>
                 )}
-                {target?.kind === "db" && !target.hasEmbedding && <Badge variant="outline">no embedding</Badge>}
+                {target?.kind === "db" && targetMissing?.includes("dnn") && (
+                  <Badge variant="outline">no embedding</Badge>
+                )}
+                {pendingIndexes.length > 0 && (
+                  <Badge variant="outline" className="border-brand/50 text-accent-foreground">
+                    indexing {pendingIndexes.length} feature{pendingIndexes.length === 1 ? "" : "s"}…
+                  </Badge>
+                )}
               </div>
               {feature && metric && (
                 <p className="text-sm text-muted-foreground">
@@ -346,6 +362,14 @@ export function SearchView() {
                 <h2 className="text-xl font-semibold">Top {result.matches.length} matches</h2>
                 <span className="text-xs text-muted-foreground">lower distance = more similar</span>
               </div>
+              {result.unindexed > 0 && (
+                <p className="mb-3 flex items-start gap-1.5 text-xs text-muted-foreground">
+                  <InfoIcon className="mt-0.5 size-3.5 shrink-0" />
+                  {result.unindexed} database image{result.unindexed === 1 ? " isn't" : "s aren't"} in this feature&apos;s
+                  index, so {result.unindexed === 1 ? "it can't" : "they can't"} appear in these results
+                  {feature?.targetFromIndex ? " (no ResNet embedding)" : " yet"}.
+                </p>
+              )}
               <ResultGrid matches={result.matches} maxDistance={maxDistance} onUseAsTarget={useMatchAsTarget} />
 
               {result.worst.length > 0 && (

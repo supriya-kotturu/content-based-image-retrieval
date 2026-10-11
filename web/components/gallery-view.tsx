@@ -73,6 +73,8 @@ export function GalleryView() {
   const visible = filtered.slice(current * PAGE, (current + 1) * PAGE);
   const uploadedCount = images.filter((i) => i.uploaded).length;
   const store = features.filter((f) => f.id !== "dnn");
+  // Features computed from pixels, i.e. the ones an upload is expected to get a row in
+  const pixelFeatures = new Set(features.filter((f) => !f.targetFromIndex).map((f) => f.id));
   // A feature is stale when its row count lags the folder (images uploaded but not yet extracted)
   const expected = images.length;
 
@@ -178,7 +180,7 @@ export function GalleryView() {
               </span>
               {img.uploaded && (
                 <span className="absolute top-1.5 left-1.5 rounded bg-brand px-1.5 text-[0.65rem] font-semibold text-brand-foreground">
-                  NEW
+                  {img.missing.some((id) => pixelFeatures.has(id)) ? "INDEXING" : "NEW"}
                 </span>
               )}
             </div>

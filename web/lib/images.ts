@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { DB_DIR, IMAGE_EXTS, TMP_DIR, imageUrl } from "./paths";
-import { embeddedNames } from "./meta";
+import { indexedNames, listFeatures } from "./meta";
 import type { DbImage } from "./compat";
 
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
@@ -15,14 +15,15 @@ const SAFE_NAME = /^[\w.-]+$/;
 const TMP_ID = /^[0-9a-f-]{36}\.(jpg|jpeg|png)$/;
 
 export async function listDbImages(): Promise<DbImage[]> {
-  const [files, embedded] = await Promise.all([fs.readdir(DB_DIR), embeddedNames()]);
+  const [files, features] = await Promise.all([fs.readdir(DB_DIR), listFeatures()]);
+  const indexed = await Promise.all(features.map(async (f) => [f.id, await indexedNames(f.id)] as const));
   return files
     .filter((f) => IMAGE_EXTS.has(path.extname(f).toLowerCase()))
     .sort()
     .map((name) => ({
       name,
       url: imageUrl(`olympus/${name}`),
-      hasEmbedding: embedded.has(name),
+      missing: indexed.filter(([, names]) => !names.has(name)).map(([id]) => id),
       uploaded: name.startsWith(UPLOAD_PREFIX),
     }));
 }

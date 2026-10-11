@@ -1,17 +1,14 @@
 import path from "node:path";
 import { CbirError, runQuery } from "@/lib/cbir";
 import { isMetric, type QueryRequest, type QueryResponse } from "@/lib/compat";
-import { dbImagePath, tmpImagePath } from "@/lib/images";
-import { isReindexing } from "@/lib/jobs";
-import { embeddedNames, listFeatures } from "@/lib/meta";
+import { dbImagePath, listDbImages, tmpImagePath } from "@/lib/images";
+import { indexedNames, listFeatures } from "@/lib/meta";
 
 const bad = (error: string, status = 400) => Response.json({ error }, { status });
 
+// No lock against a running re-index: extract swaps csv files in atomically, so a query reads the
+// previous version or the new one
 export async function POST(req: Request) {
-  if (isReindexing()) {
-    return bad("The database is being re-indexed; try again when it finishes.", 409);
-  }
-
   let body: Partial<QueryRequest>;
   try {
     body = await req.json();
@@ -36,17 +33,22 @@ export async function POST(req: Request) {
   else if (target?.kind === "temp") targetPath = await tmpImagePath(target.id);
   if (!targetPath) return bad("target image not found");
 
-  if (feature.needsEmbedding) {
-    const embedded = await embeddedNames();
-    if (target?.kind === "temp" || !embedded.has(path.basename(targetPath))) {
-      return bad(`${feature.label} only works on original database images: it needs their provided ResNet embedding`);
-    }
+  const [indexed, images] = await Promise.all([indexedNames(feature.id), listDbImages()]);
+  if (feature.targetFromIndex && (target?.kind === "temp" || !indexed.has(path.basename(targetPath)))) {
+    return bad(
+      `${feature.label} reads the target's vector from the index, and this image has no row in it ` +
+        `(only the original database images have a ResNet embedding)`,
+    );
   }
 
   const started = performance.now();
   try {
     const result = await runQuery({ featureId: feature.id, metric, targetPath, top, worst });
-    const res: QueryResponse = { ...result, elapsedMs: Math.round(performance.now() - started) };
+    const res: QueryResponse = {
+      ...result,
+      elapsedMs: Math.round(performance.now() - started),
+      unindexed: images.filter((i) => !indexed.has(i.name)).length,
+    };
     return Response.json(res);
   } catch (err) {
     if (err instanceof CbirError) return bad(err.message, 422);

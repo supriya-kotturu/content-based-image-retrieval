@@ -37,10 +37,18 @@ export const FEATURE_LABEL: Record<FeatureKind, string> = {
   dnn: "ResNet18 embedding",
 };
 
-// The embedding comes from the provided ResNet csv (no network to compute it), so the target must
-// already have a row there
-export function needsEmbedding(kind: FeatureKind): boolean {
+// query computes most targets from pixels, but these read the target's vector from the index (the
+// embedding half comes from the provided ResNet csv, and there's no network to compute it), so the
+// target must already have a row
+export function targetFromIndex(kind: FeatureKind): boolean {
   return kind === "dnn" || kind === "orange_dnn";
+}
+
+// One availability rule for every image, original or uploaded: a feature is usable unless it
+// needs the target's own row and the image doesn't have one yet
+export function isUsable(feature: FeatureInfo, target: { missing: string[] } | null): boolean {
+  if (!feature.targetFromIndex) return true;
+  return target !== null && !target.missing.includes(feature.id);
 }
 
 export function isMetric(x: unknown): x is Metric {
@@ -55,13 +63,15 @@ export interface FeatureInfo {
   detail: string; // e.g. "bins=16"
   rows: number;
   metrics: Metric[];
-  needsEmbedding: boolean;
+  targetFromIndex: boolean;
 }
 
 export interface DbImage {
   name: string;
   url: string;
-  hasEmbedding: boolean;
+  // Feature ids with no row for this image, read from the csvs themselves so it can't disagree
+  // with what query searches. Usually empty; a fresh upload lists everything not yet extracted.
+  missing: string[];
   uploaded: boolean;
 }
 
@@ -87,6 +97,8 @@ export interface QueryResponse {
   worst: Match[];
   elapsedMs: number;
   command: string;
+  // Database images this feature has no row for, so they can't appear in the ranking
+  unindexed: number;
 }
 
 export interface ReindexStatus {

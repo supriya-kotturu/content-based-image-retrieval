@@ -122,8 +122,14 @@ export function parseQueryOutput(stdout: string, bareNames: boolean): { matches:
   return { matches, worst };
 }
 
-export async function runExtract(meta: FeatureMeta, onProgress: (done: number, total: number) => void) {
-  const args = [`db=${rel(DB_DIR)}`, `feature=${meta.kind}`, "root=data"];
+// append=1 computes only images with no row yet (and drops rows for deleted images); a full run
+// recomputes everything, which is only needed when the feature code itself changed
+export async function runExtract(
+  meta: FeatureMeta,
+  append: boolean,
+  onProgress: (done: number, total: number) => void,
+) {
+  const args = [`db=${rel(DB_DIR)}`, `feature=${meta.kind}`, "root=data", `append=${append ? 1 : 0}`];
   if (meta.bins !== undefined) args.push(`bins=${meta.bins}`);
   if (meta.patch !== undefined) args.push(`patch=${meta.patch}`);
   if (meta.kind === "orange_dnn") args.push(`dnn=${rel(RESNET_CSV)}`);

@@ -2,7 +2,7 @@ import "server-only";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { CSV_DIR, RESNET_CSV } from "./paths";
-import { FEATURE_LABEL, METRICS_FOR, needsEmbedding, type FeatureInfo, type FeatureKind } from "./compat";
+import { FEATURE_LABEL, METRICS_FOR, targetFromIndex, type FeatureInfo, type FeatureKind } from "./compat";
 
 export interface FeatureMeta {
   id: string;
@@ -75,7 +75,7 @@ export async function listFeatures(): Promise<FeatureInfo[]> {
     detail: detailOf(m),
     rows: m.rows,
     metrics: METRICS_FOR[m.kind],
-    needsEmbedding: needsEmbedding(m.kind),
+    targetFromIndex: targetFromIndex(m.kind),
   }));
   const names = await embeddedNames();
   if (names.size > 0) {
@@ -86,25 +86,53 @@ export async function listFeatures(): Promise<FeatureInfo[]> {
       detail: "512-d, provided",
       rows: names.size,
       metrics: METRICS_FOR.dnn,
-      needsEmbedding: true,
+      targetFromIndex: true,
     });
   }
   return features;
 }
 
-// Filenames that have a ResNet row. The csv is static, so read it once per server process.
-const g = globalThis as unknown as { __cbirEmbedded?: Promise<Set<string>> };
-export function embeddedNames(): Promise<Set<string>> {
-  g.__cbirEmbedded ??= fs
-    .readFile(RESNET_CSV, "utf8")
+// Image names with a row in a csv: the first column, reduced to the basename. The csvs are the
+// source of truth for "is this image indexed", so read them rather than tracking status on the
+// side. Cached per file and invalidated by mtime/size, since extract replaces files atomically.
+interface CachedNames {
+  stamp: string;
+  names: Promise<Set<string>>;
+}
+const g = globalThis as unknown as { __cbirNames?: Map<string, CachedNames> };
+const nameCache = (g.__cbirNames ??= new Map());
+
+async function namesInCsv(csvPath: string): Promise<Set<string>> {
+  let stamp: string;
+  try {
+    const st = await fs.stat(csvPath);
+    stamp = `${st.mtimeMs}:${st.size}`;
+  } catch {
+    return new Set();
+  }
+  const hit = nameCache.get(csvPath);
+  if (hit && hit.stamp === stamp) return hit.names;
+
+  const names = fs
+    .readFile(csvPath, "utf8")
     .then((text) => {
-      const names = new Set<string>();
+      const set = new Set<string>();
       for (const line of text.split(/\r?\n/)) {
         const comma = line.indexOf(",");
-        if (comma > 0) names.add(path.basename(line.slice(0, comma)));
+        if (comma > 0) set.add(path.basename(line.slice(0, comma)));
       }
-      return names;
+      return set;
     })
     .catch(() => new Set<string>());
-  return g.__cbirEmbedded;
+  nameCache.set(csvPath, { stamp, names });
+  return names;
+}
+
+export function embeddedNames(): Promise<Set<string>> {
+  return namesInCsv(RESNET_CSV);
+}
+
+// Which images a feature can rank (and use as a target, for targetFromIndex features)
+export function indexedNames(featureId: string): Promise<Set<string>> {
+  return featureId === "dnn" ? embeddedNames() : namesInCsv(path.join(CSV_DIR, `${featureId}.csv`));
 }
