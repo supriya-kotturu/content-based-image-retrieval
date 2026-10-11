@@ -60,7 +60,7 @@ file does not depend on where the project folder is.
 ## query
 
 ```
-./out/query.exe csv=<feature csv> target=<image> metric=<name> [top=10] [worst=0] [root=data]
+./out/query.exe csv=<feature csv> target=<image> metric=<name> [top=10] [worst=0] [root=data] [gui=0]
 ```
 
 | metric | use with |
@@ -118,6 +118,33 @@ brightness at least 0.6), so it records the object's shade and ignores the backg
   with `top=12` (or more) so the grid wraps and scrolls.
 - **Least similar results:** `worst=3` also prints and shows the three images farthest from the target.
 - **Custom feature (task 7)** and the mask/basketball comparison described above.
+- **Web app (`web/`):** a Next.js front end over the same two programs, described below.
+
+## Web app
+
+A local Next.js app (`web/`) for searching from the browser and adding images to the database. It does
+not reimplement any feature: every ranking is a `query` run and every re-index is an `extract` run, so
+results are identical to the command line.
+
+```
+cmake --build build --config Release      # the app calls out/query.exe and out/extract.exe
+cd web
+npm install
+npm run dev                               # http://localhost:3000
+```
+
+- **Search:** pick a target from the database or upload a one-off image (saved to `data/tmp`, never
+  indexed), choose a feature (one per `.meta` in `data/csv`, plus the provided ResNet18 embeddings) and a
+  metric valid for it, and set how many best and least similar matches to show. The exact `query`
+  command that produced the results is shown under the target.
+- **Database:** uploads go into `data/olympus` as `upload_<time>_<name>.jpg`, then `extract` is re-run in
+  the background for every existing feature file, with the same parameters as its `.meta`. Searches are
+  refused (HTTP 409) while that runs, because `extract` rewrites the csv files in place. Note that this
+  changes the tracked files in `data/csv`.
+- **Limitation:** the ResNet18 and `orange_dnn` features need a provided embedding, which uploaded
+  images do not have, so those features are disabled for uploaded and one-off targets.
+- `query gui=0` prints the results without opening the window, which is how the app runs it.
+- The app finds the project through `CBIR_ROOT` (default: the folder above `web/`).
 
 ## Source files
 
