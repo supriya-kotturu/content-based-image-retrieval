@@ -3,7 +3,7 @@
   Date:    2026-10-06
   Purpose: The query program: loads a feature file made by extract (or the provided ResNet18
            embeddings), ranks every image by distance to a target image, prints the closest and
-           optionally the least similar, and shows them in a labelled, scrollable results window.
+           optionally the least similar, and shows them in a labeled, scrollable results window.
 */
 
 #include <algorithm>

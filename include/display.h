@@ -15,7 +15,7 @@
 // window. The window scrolls vertically (mouse wheel, arrow keys, PageUp/PageDown, Home/End) and
 // blocks until q or Esc is pressed or the window is closed.
 //
-// matchLabels[i] is drawn under matchPaths[i]; '\n' starts a new line. The target is labelled
+// matchLabels[i] is drawn under matchPaths[i]; '\n' starts a new line. The target is labeled
 // "TARGET" plus its filename. `title` is drawn across the top, e.g. the feature and metric used,
 // so a screenshot in the report is self-describing.
 //
