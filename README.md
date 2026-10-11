@@ -40,7 +40,7 @@ cd web && npm install && npm run dev     # web UI at http://localhost:3000
   - **Results:** shown as ranked tiles with distance bars, along with the exact `query` command that produced them. Any result can become the next target.
 - **Database:**
   - Browse the images and drag in new ones.
-  - Uploads are indexed by re-running `extract` for every feature in the background, with live progress. Searches pause until it finishes.
+  - Uploads are indexed in the background with `extract append=1`, which computes only the new images. That takes a few seconds for all features, and searching keeps working throughout.
 - **Limitation:** the ResNet18-based features need a provided embedding, so they work only on the original
   1,106 images.
 

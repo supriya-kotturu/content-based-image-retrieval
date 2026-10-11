@@ -51,7 +51,7 @@ Paths stored in the csv files are relative to `data/` (for example `olympus/pic.
 ## `extract` reference
 
 ```
-./out/extract.exe db=data/olympus feature=<name> [bins=16] [patch=<odd size>] [dnn=<csv>] [out=<dir>] [root=data]
+./out/extract.exe db=data/olympus feature=<name> [bins=16] [patch=<odd size>] [dnn=<csv>] [out=<dir>] [root=data] [append=0|1]
 ```
 
 | feature | what it is | parameters | output file |
@@ -64,7 +64,13 @@ Paths stored in the csv files are relative to `data/` (for example `olympus/pic.
 
 - Each csv gets a `.meta` next to it, recording the feature, its parameters and the row/vector counts.
 - Images that can't be read are skipped, with the reason printed. An invalid parameter stops the run.
-- Output is overwritten on every run. Unknown or misspelled arguments are reported, not ignored.
+- Unknown or misspelled arguments are reported, not ignored.
+- **`append=1`** reuses the rows already in the csv and computes only images that have none. It also drops
+  rows for images that were deleted. The result is byte-identical to a full run. Adding one image to
+  `texture_color` takes about 1 s instead of 15 s. Without `append`, every row is recomputed, which you need
+  after changing the feature code.
+- Files are replaced atomically (written as `.tmp`, then renamed), so a `query` running at the same time
+  reads the old version or the new one, never a partial file.
 
 ## `query` reference
 
@@ -207,7 +213,8 @@ To set it, create `web/.env.local` (gitignored) containing `CBIR_ROOT=..` or an 
 |---|---|
 | Search with a database image | Nothing |
 | Search with a one-off upload | `data/tmp/<uuid>.jpg` (deleted after 24 h) |
-| Upload to the database | `data/olympus/upload_*`, then every **git-tracked** `data/csv/*.csv` and `*.meta` file is rewritten |
+| Upload to the database | `data/olympus/upload_*`, then `extract append=1` rewrites every **git-tracked** `data/csv/*.csv` and `*.meta` file with one more row |
+| Rebuild (Database page) | Every `data/csv` file, recomputed from scratch |
 
 To undo database uploads:
 
@@ -222,6 +229,7 @@ git checkout data/csv
 |---|---|
 | `cannot start query.exe: spawn … ENOENT` | The C++ isn't built, or `CBIR_ROOT` points to the wrong folder. Build in Release and check `out/query.exe` exists. |
 | A query returns 422 with a C++ message | `query` rejected the input, for example a csv without its `.meta`. The message is `query`'s own stderr. |
-| A query returns 409 | A re-index is running. Wait for the Database page banner to finish. |
+| An uploaded image is missing from results | It isn't indexed for that feature yet. The results say how many images aren't indexed, and the Database page shows `INDEXING` until it's done. |
+| `cannot append to it (status -4)` from `extract append=1` | The csv and its `.meta` disagree, for example after an interrupted write or a hand edit. Run the same command without `append=1` to rebuild it. |
 | Exit code `0xC0000135` when running an exe | The OpenCV DLLs are missing next to it. Re-run the CMake build, which copies them. |
 | The Database page shows red dots | Those feature files have fewer rows than the image folder. Click **Rebuild**, or wait for the re-index. |
