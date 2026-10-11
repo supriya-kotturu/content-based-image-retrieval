@@ -73,6 +73,11 @@ StoreStatus readMeta(const std::string& metaPath, FeatureMeta& meta) {
     // stoi/stoul throw on garbage; a corrupt meta must not crash the caller
     try {
         while (std::getline(in, line)) {
+            // A file checked out on Windows (git autocrlf) has CRLF endings; on Linux getline
+            // keeps the '\r', which would turn "histogram" into an unknown feature
+            if (!line.empty() && line.back() == '\r') {
+                line.pop_back();
+            }
             size_t eqPos = line.find('=');
             if (eqPos == std::string::npos) {
                 return STORE_ERR_BAD_META;

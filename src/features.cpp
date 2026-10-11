@@ -1,12 +1,12 @@
 /*
   Author:  Sai Supriya Kotturu
   Date:    2026-10-06
-  Purpose: Definitions of the feature extractors declared in features.h: the 7x7 baseline patch, the
+  Purpose: Definitions of the feature extractors declared in image_features.h: the 7x7 baseline patch, the
            rg chromaticity histogram, the multi-histogram, texture + color (Sobel magnitudes), and
            the custom orange-mask feature. All pixel-level work for features lives here.
 */
 
-#include <features.h>
+#include <image_features.h>
 #include <sobel.h>
 
 #include <algorithm>

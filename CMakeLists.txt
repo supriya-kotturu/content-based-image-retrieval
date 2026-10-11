@@ -41,7 +41,7 @@ add_library(cbir_common STATIC
 	src/sobel.cpp
 
 	include/sobel.h
-	include/features.h
+	include/image_features.h
 	include/csv_util.h
 	include/common.h
 	include/feature_store.h

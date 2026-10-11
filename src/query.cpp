@@ -21,7 +21,7 @@
 #include "csv_util.h"
 #include "display.h"
 #include "feature_store.h"
-#include "features.h"
+#include "image_features.h"
 #include "metrics.h"
 
 namespace fs = std::filesystem;

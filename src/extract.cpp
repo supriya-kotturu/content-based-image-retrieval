@@ -19,7 +19,7 @@
 #include "common.h"
 #include "csv_util.h"
 #include "feature_store.h"
-#include "features.h"
+#include "image_features.h"
 
 namespace fs = std::filesystem;
 

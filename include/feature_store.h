@@ -9,7 +9,7 @@
 #ifndef FEATURE_STORE_H
 #define FEATURE_STORE_H
 
-#include <features.h>
+#include <image_features.h>
 
 #include <cstddef>
 #include <string>

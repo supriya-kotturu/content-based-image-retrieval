@@ -6,8 +6,8 @@
            codes they return. Each feature turns one BGR image into one vector of floats.
 */
 
-#ifndef FEATURES_H
-#define FEATURES_H
+#ifndef IMAGE_FEATURES_H
+#define IMAGE_FEATURES_H
 
 #include <opencv2/core.hpp>
 
