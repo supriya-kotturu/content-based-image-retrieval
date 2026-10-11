@@ -69,3 +69,5 @@ Testing/
 
 # data
 *olympus/
+# web app: one-off query images
+data/tmp/
