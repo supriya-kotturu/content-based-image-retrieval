@@ -39,3 +39,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# deploy/stage-netlify.sh output (build artifacts, not source)
+/cbir/
+/public/olympus/
+# local Netlify CLI state
+.netlify

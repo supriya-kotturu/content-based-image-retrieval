@@ -1,0 +1,20 @@
+# Read-only search deployment. Run deploy/stage-netlify.sh first; see DEPLOYMENT.md.
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+# Pinned in package.json so local CLI builds use the same adapter version as CI would
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+[functions]
+  # Bundled into the Next.js server function next to the route handlers
+  included_files = [
+    "cbir/out/query",
+    "cbir/data/csv/**",
+    "cbir/data/resNet/**",
+    "cbir/data/olympus/**",
+  ]

@@ -69,5 +69,9 @@ Testing/
 
 # data
 *olympus/
-# web app: one-off query images
-data/tmp/
+
+# Linux build of query for deployment
+out/linux/
+
+# Local Netlify folder
+.netlify

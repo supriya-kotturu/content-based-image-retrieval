@@ -1,0 +1,29 @@
+# Builds a Linux `query` that runs on Netlify Functions (AWS Lambda, Amazon Linux 2023).
+# Building on the same distro matches its glibc; OpenCV is linked statically so no .so files ship.
+# Usage: see DEPLOYMENT.md, step 3.
+FROM amazonlinux:2023
+
+# Same version as the local Windows build (C:/opencv), so features compute identically
+ARG OPENCV_REF=5.0.0
+
+RUN dnf install -y gcc-c++ make cmake git tar gzip && dnf clean all
+
+# Headless, static, and only the modules query links. highgui is built with no GUI backend:
+# display.cpp references it, but gui=0 never opens a window.
+RUN git clone --depth 1 --branch ${OPENCV_REF} https://github.com/opencv/opencv.git /opencv-src \
+ && cmake -S /opencv-src -B /opencv-build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/opt/opencv \
+      -DBUILD_SHARED_LIBS=OFF -DBUILD_LIST=core,imgproc,imgcodecs,highgui \
+      -DBUILD_ZLIB=ON -DBUILD_JPEG=ON -DBUILD_PNG=ON \
+      -DWITH_GTK=OFF -DWITH_QT=OFF -DWITH_FFMPEG=OFF -DWITH_GSTREAMER=OFF -DWITH_V4L=OFF \
+      -DWITH_TIFF=OFF -DWITH_WEBP=OFF -DWITH_OPENJPEG=OFF -DWITH_JASPER=OFF -DWITH_OPENEXR=OFF \
+      -DWITH_AVIF=OFF -DWITH_IPP=OFF -DWITH_ITT=OFF -DWITH_OPENCL=OFF -DWITH_PROTOBUF=OFF \
+      -DBUILD_TESTS=OFF -DBUILD_PERF_TESTS=OFF -DBUILD_EXAMPLES=OFF -DBUILD_opencv_apps=OFF \
+      -DBUILD_DOCS=OFF -DBUILD_JAVA=OFF -DBUILD_opencv_python3=OFF \
+ && cmake --build /opencv-build -j"$(nproc)" --target install \
+ && rm -rf /opencv-src /opencv-build
+
+# Kept after the OpenCV layer so adding it doesn't invalidate that slow, cached build.
+# Static libstdc++/libgcc: query then needs only glibc from the Lambda image.
+RUN dnf install -y libstdc++-static && dnf clean all
+
+WORKDIR /src
