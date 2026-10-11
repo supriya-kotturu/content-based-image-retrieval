@@ -20,12 +20,15 @@ export async function api<T>(input: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
+export interface AppConfig {
+  features: FeatureInfo[];
+  readOnly: boolean;
+  maxUploadBytes: number;
+}
+
 export async function fetchCatalog() {
-  const [cfg, imgs] = await Promise.all([
-    api<{ features: FeatureInfo[] }>("/api/config"),
-    api<{ images: DbImage[] }>("/api/images"),
-  ]);
-  return { features: cfg.features, images: imgs.images };
+  const [cfg, imgs] = await Promise.all([api<AppConfig>("/api/config"), api<{ images: DbImage[] }>("/api/images")]);
+  return { ...cfg, images: imgs.images };
 }
 
 export function postJson<T>(url: string, data: unknown): Promise<T> {

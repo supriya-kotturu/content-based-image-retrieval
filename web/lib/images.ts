@@ -1,18 +1,19 @@
 import "server-only";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { DB_DIR, IMAGE_EXTS, TMP_DIR, imageUrl } from "./paths";
+import { DB_DIR, IMAGE_EXTS, READ_ONLY, imageUrl } from "./paths";
 import { indexedNames, listFeatures } from "./meta";
 import type { DbImage } from "./compat";
 
-export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+// Netlify buffers request bodies up to 6 MB and base64-encodes binary ones (~4.5 MB of image), so
+// stay under that there and report it ourselves instead of hitting the platform's 413
+export const MAX_UPLOAD_BYTES = (READ_ONLY ? 4 : 10) * 1024 * 1024;
 export const UPLOAD_PREFIX = "upload_";
-const TMP_TTL_MS = 24 * 60 * 60 * 1000;
 
 // Names are used in subprocess args and file paths, so only allow the plain form extract produces
 const SAFE_NAME = /^[\w.-]+$/;
-const TMP_ID = /^[0-9a-f-]{36}\.(jpg|jpeg|png)$/;
 
 export async function listDbImages(): Promise<DbImage[]> {
   const [files, features] = await Promise.all([fs.readdir(DB_DIR), listFeatures()]);
@@ -39,23 +40,14 @@ export async function dbImagePath(name: string): Promise<string | null> {
   }
 }
 
-export async function tmpImagePath(id: string): Promise<string | null> {
-  if (!TMP_ID.test(id)) return null;
-  const abs = path.join(TMP_DIR, id);
-  try {
-    await fs.access(abs);
-    return abs;
-  } catch {
-    return null;
-  }
-}
-
 export class UploadError extends Error {}
 
 function checkFile(file: File): string {
   const ext = path.extname(file.name).toLowerCase();
   if (!IMAGE_EXTS.has(ext)) throw new UploadError(`${file.name}: only .jpg, .jpeg and .png are supported`);
-  if (file.size > MAX_UPLOAD_BYTES) throw new UploadError(`${file.name}: larger than 10 MB`);
+  if (file.size > MAX_UPLOAD_BYTES) {
+    throw new UploadError(`${file.name}: larger than ${MAX_UPLOAD_BYTES / 1024 / 1024} MB`);
+  }
   return ext;
 }
 
@@ -87,24 +79,16 @@ export async function saveToDb(file: File): Promise<string> {
   return name;
 }
 
-export async function saveTemp(file: File): Promise<string> {
+// A one-off target lives only for the request that searches with it. Uploading it in a separate
+// request would break on serverless hosts, where the next request may land on another instance
+// with a different /tmp.
+export async function withTempImage<T>(file: File, fn: (absPath: string) => Promise<T>): Promise<T> {
   const { ext, buf } = await readChecked(file);
-  await fs.mkdir(TMP_DIR, { recursive: true });
-  void cleanTemp();
-  const id = `${randomUUID()}${ext}`;
-  await fs.writeFile(path.join(TMP_DIR, id), buf);
-  return id;
-}
-
-async function cleanTemp() {
+  const abs = path.join(os.tmpdir(), `cbir-${randomUUID()}${ext}`);
+  await fs.writeFile(abs, buf);
   try {
-    const now = Date.now();
-    for (const f of await fs.readdir(TMP_DIR)) {
-      const abs = path.join(TMP_DIR, f);
-      const { mtimeMs } = await fs.stat(abs);
-      if (now - mtimeMs > TMP_TTL_MS) await fs.rm(abs, { force: true });
-    }
-  } catch {
-    // best effort
+    return await fn(abs);
+  } finally {
+    await fs.rm(abs, { force: true });
   }
 }

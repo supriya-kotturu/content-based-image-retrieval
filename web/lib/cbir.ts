@@ -1,5 +1,7 @@
 import "server-only";
 import { spawn } from "node:child_process";
+import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { CBIR_ROOT, DB_DIR, EXTRACT_EXE, QUERY_EXE, RESNET_CSV, imageUrl } from "./paths";
 import type { FeatureMeta } from "./meta";
@@ -22,13 +24,40 @@ interface RunResult {
   stderr: string;
 }
 
+// A serverless bundle is read-only and may not keep the exec bit, so on Linux the binary is copied
+// to the writable tmp dir and marked executable once per instance. cwd stays CBIR_ROOT: query
+// only reads from it.
+const runnable = new Map<string, Promise<string>>();
+function runnableExe(src: string): Promise<string> {
+  if (process.platform === "win32") return Promise.resolve(src);
+  let p = runnable.get(src);
+  if (!p) {
+    p = (async () => {
+      const dst = path.join(os.tmpdir(), `cbir-${path.basename(src)}`);
+      await fs.copyFile(src, dst);
+      await fs.chmod(dst, 0o755);
+      return dst;
+    })();
+    // A failed copy shouldn't stick: let the next call try again
+    p.catch(() => runnable.delete(src));
+    runnable.set(src, p);
+  }
+  return p;
+}
+
 // Args as an array, never a shell string: target names come from users
-function run(
-  exe: string,
+async function run(
+  exeSrc: string,
   args: string[],
   timeoutMs: number,
   onStdoutLine?: (line: string) => void,
 ): Promise<RunResult> {
+  let exe: string;
+  try {
+    exe = await runnableExe(exeSrc);
+  } catch (err) {
+    throw new CbirError(`cannot prepare ${path.basename(exeSrc)}: ${(err as Error).message}`, "");
+  }
   return new Promise((resolve, reject) => {
     const child = spawn(exe, args, { cwd: CBIR_ROOT, windowsHide: true });
     let stdout = "";
@@ -69,6 +98,7 @@ export interface QueryParams {
   featureId: string; // csv basename or "dnn"
   metric: Metric;
   targetPath: string; // absolute path to the target image
+  targetLabel?: string; // shown in the echoed command instead of targetPath
   top: number;
   worst: number;
 }
@@ -100,7 +130,9 @@ export async function runQuery(p: QueryParams): Promise<QueryResult> {
 
   const { stdout } = await run(QUERY_EXE, args, 30_000);
   const { matches, worst } = parseQueryOutput(stdout, p.featureId === "dnn");
-  return { matches, worst, command: `query ${args.join(" ")}` };
+  // A one-off upload lives at a throwaway server path; show what to substitute instead
+  const shown = p.targetLabel ? args.map((a) => (a.startsWith("target=") ? `target=${p.targetLabel}` : a)) : args;
+  return { matches, worst, command: `query ${shown.join(" ")}` };
 }
 
 // query prints "rank\tdistance\tpath" rows, then "least similar:" and "-k\t..." rows.

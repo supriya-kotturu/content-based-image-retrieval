@@ -22,12 +22,14 @@ export function GalleryView() {
   const [scope, setScope] = useState<string>("all");
   const [page, setPage] = useState(0);
   const [uploading, setUploading] = useState(false);
+  const [readOnly, setReadOnly] = useState(false);
 
   const load = useCallback(
     () =>
       fetchCatalog().then((c) => {
         setImages(c.images);
         setFeatures(c.features);
+        setReadOnly(c.readOnly);
       }),
     [],
   );
@@ -42,6 +44,7 @@ export function GalleryView() {
       .then((c) => {
         setImages(c.images);
         setFeatures(c.features);
+        setReadOnly(c.readOnly);
       })
       .catch((e) => toast.error(e.message));
   }, []);
@@ -84,37 +87,48 @@ export function GalleryView() {
         <h1 className="text-3xl font-semibold sm:text-4xl">Database</h1>
         <p className="max-w-2xl text-muted-foreground">
           {images.length.toLocaleString()} images in <span className="font-mono text-sm">data/olympus</span>
-          {uploadedCount > 0 && <> · {uploadedCount} uploaded</>}. New images are indexed by re-running the C++{" "}
-          <span className="font-mono text-xs">extract</span> program for every feature.
+          {uploadedCount > 0 && <> · {uploadedCount} uploaded</>}.{" "}
+          {readOnly ? (
+            <>This deployment is read-only: browse and search, but adding images needs a local run.</>
+          ) : (
+            <>
+              New images are indexed by the C++ <span className="font-mono text-xs">extract</span> program, which
+              computes only what&apos;s missing.
+            </>
+          )}
         </p>
       </div>
 
       <ReindexBanner status={status} />
 
-      <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
-        <UploadDropzone
-          multiple
-          busy={uploading}
-          onFiles={upload}
-          title="Add images to the database"
-          hint="Drop JPG/PNG files (≤ 10 MB each). Features are re-extracted automatically; DNN features can't be computed for new images."
-          className="py-10"
-        />
+      <div className={readOnly ? "grid gap-6" : "grid gap-6 lg:grid-cols-[1fr_340px]"}>
+        {!readOnly && (
+          <UploadDropzone
+            multiple
+            busy={uploading}
+            onFiles={upload}
+            title="Add images to the database"
+            hint="Drop JPG/PNG files (≤ 10 MB each). Features are extracted in seconds; DNN features can't be computed for new images."
+            className="py-10"
+          />
+        )}
 
         <section className="card-surface space-y-3 p-4">
           <div className="flex items-center justify-between">
             <h2 className="panel-title">Feature index</h2>
-            <Button
-              variant="ghost"
-              size="xs"
-              disabled={status?.running}
-              onClick={async () => {
-                await postJson<ReindexStatus>("/api/reindex", {});
-                void refresh();
-              }}
-            >
-              <RefreshCwIcon /> Rebuild
-            </Button>
+            {!readOnly && (
+              <Button
+                variant="ghost"
+                size="xs"
+                disabled={status?.running}
+                onClick={async () => {
+                  await postJson<ReindexStatus>("/api/reindex", {});
+                  void refresh();
+                }}
+              >
+                <RefreshCwIcon /> Rebuild
+              </Button>
+            )}
           </div>
           <ul className="space-y-1.5 text-sm">
             {store.map((f) => {

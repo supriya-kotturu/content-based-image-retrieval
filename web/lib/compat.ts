@@ -75,7 +75,8 @@ export interface DbImage {
   uploaded: boolean;
 }
 
-export type QueryTarget = { kind: "db"; id: string } | { kind: "temp"; id: string };
+// "upload": a one-off image sent in the same multipart request
+export type QueryTarget = { kind: "db"; id: string } | { kind: "upload" };
 
 export interface QueryRequest {
   featureId: string;

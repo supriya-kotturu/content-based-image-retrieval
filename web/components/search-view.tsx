@@ -17,12 +17,12 @@ import { UploadDropzone } from "@/components/upload-dropzone";
 import { ResultGrid } from "@/components/result-grid";
 import { ReindexBanner } from "@/components/reindex-banner";
 import { useReindex } from "@/hooks/use-reindex";
-import { fetchCatalog, postFiles, postJson } from "@/lib/api";
+import { api, fetchCatalog, postJson } from "@/lib/api";
 import { METRIC_LABEL, isUsable, type DbImage, type FeatureInfo, type Match, type Metric, type QueryResponse } from "@/lib/compat";
 
 // Only which image is selected; what it's indexed in is derived from the latest image list, so it
 // updates by itself when a re-index finishes
-type Target = { kind: "db"; id: string; url: string } | { kind: "temp"; id: string; url: string; fileName: string };
+type Target = { kind: "db"; id: string; url: string } | { kind: "upload"; file: File; url: string; fileName: string };
 
 function sliderValue(v: number | readonly number[]): number {
   return Array.isArray(v) ? v[0] : (v as number);
@@ -38,7 +38,7 @@ export function SearchView() {
   const [top, setTop] = useState(10);
   const [worst, setWorst] = useState(0);
   const [tab, setTab] = useState<string>("db");
-  const [uploading, setUploading] = useState(false);
+  const [maxUploadBytes, setMaxUploadBytes] = useState(0);
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<QueryResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -47,6 +47,7 @@ export function SearchView() {
     fetchCatalog()
       .then((c) => {
         setFeatures(c.features);
+        setMaxUploadBytes(c.maxUploadBytes);
         setImages(c.images);
       })
       .catch(() => {});
@@ -59,6 +60,7 @@ export function SearchView() {
     fetchCatalog()
       .then((c) => {
         setFeatures(c.features);
+        setMaxUploadBytes(c.maxUploadBytes);
         setImages(c.images);
         const img = c.images.find((i) => i.name === initialTarget);
         if (img) setTarget({ kind: "db", id: img.name, url: img.url });
@@ -69,7 +71,7 @@ export function SearchView() {
   // A one-off upload has no row anywhere; a database image has rows wherever the csvs say so
   const targetMissing = useMemo(() => {
     if (!target) return null;
-    if (target.kind === "temp") return features.map((f) => f.id);
+    if (target.kind === "upload") return features.map((f) => f.id);
     return images.find((i) => i.name === target.id)?.missing ?? [];
   }, [target, images, features]);
 
@@ -106,13 +108,17 @@ export function SearchView() {
     setRunning(true);
     setError(null);
     try {
-      const res = await postJson<QueryResponse>("/api/query", {
-        featureId: feature.id,
-        metric,
-        target: { kind: t.kind, id: t.id },
-        top,
-        worst,
-      });
+      const common = { featureId: feature.id, metric, top, worst };
+      let res: QueryResponse;
+      if (t.kind === "upload") {
+        // The image rides along with the search, so the server never has to keep it
+        const form = new FormData();
+        form.append("file", t.file);
+        form.append("request", JSON.stringify({ ...common, target: { kind: "upload" } }));
+        res = await api<QueryResponse>("/api/query", { method: "POST", body: form });
+      } else {
+        res = await postJson<QueryResponse>("/api/query", { ...common, target: { kind: "db", id: t.id } });
+      }
       setResult(res);
     } catch (e) {
       const msg = (e as Error).message;
@@ -123,18 +129,28 @@ export function SearchView() {
     }
   };
 
-  const uploadTarget = async (files: File[]) => {
-    setUploading(true);
-    try {
-      const { id, url } = await postFiles<{ id: string; url: string }>("/api/targets", "file", files);
-      setTarget({ kind: "temp", id, url, fileName: files[0].name });
-      setResult(null);
-    } catch (e) {
-      toast.error((e as Error).message);
-    } finally {
-      setUploading(false);
+  // Nothing is uploaded yet: the file is kept in the browser and sent with each search
+  const uploadTarget = (files: File[]) => {
+    const file = files[0];
+    if (!/\.(jpe?g|png)$/i.test(file.name)) {
+      toast.error(`${file.name}: only .jpg, .jpeg and .png are supported`);
+      return;
     }
+    if (maxUploadBytes && file.size > maxUploadBytes) {
+      toast.error(`${file.name}: larger than ${Math.round(maxUploadBytes / 1024 / 1024)} MB`);
+      return;
+    }
+    setTarget({ kind: "upload", file, url: URL.createObjectURL(file), fileName: file.name });
+    setResult(null);
   };
+
+  // Free the previous preview's object URL when the target changes
+  useEffect(() => {
+    const url = target?.kind === "upload" ? target.url : null;
+    return () => {
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [target]);
 
   const useMatchAsTarget = (m: Match) => {
     const img = images.find((i) => i.name === m.name);
@@ -195,10 +211,9 @@ export function SearchView() {
               </TabsContent>
               <TabsContent value="upload" className="pt-2">
                 <UploadDropzone
-                  busy={uploading}
                   onFiles={uploadTarget}
                   title="Drop a query image"
-                  hint="JPG or PNG, up to 10 MB. Used for this search only, not added to the database."
+                  hint={`JPG or PNG, up to ${Math.round(maxUploadBytes / 1024 / 1024) || 10} MB. Sent with each search, never added to the database.`}
                 />
               </TabsContent>
             </Tabs>
@@ -303,7 +318,7 @@ export function SearchView() {
                 <span className="truncate font-mono text-sm">
                   {target ? (target.kind === "db" ? target.id : target.fileName) : "—"}
                 </span>
-                {target?.kind === "temp" && (
+                {target?.kind === "upload" && (
                   <>
                     <Badge variant="secondary">one-off upload</Badge>
                     <Tooltip>
