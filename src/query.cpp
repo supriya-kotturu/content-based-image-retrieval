@@ -95,8 +95,8 @@ struct Prepared {
 };
 
 // CSV written by extract: a .meta says how it was made, so the target is computed the same way
-int prepareFromStore(const std::string& csv, const std::string& targetPath,
-                     const std::string& root, Metric metric, Prepared& out) {
+int prepareFromStore(const std::string& csv, const std::string& targetPath, const std::string& root,
+                     Metric metric, Prepared& out) {
     FeatureMeta meta;
     StoreStatus status = loadFeatures(csv, meta, out.imagePaths, out.vectors);
     if (status != STORE_OK) {
@@ -124,7 +124,8 @@ int prepareFromStore(const std::string& csv, const std::string& targetPath,
     // feature has no other meaningful metric
     if ((metric == Metric::CUSTOM) != (meta.feature == FeatureType::ORANGE_DNN)) {
         std::cerr << "metric custom and feature orange_dnn go together, but " << csv << " is "
-                  << featureTypeName(meta.feature) << " and metric is " << (metric == Metric::CUSTOM ? "custom" : "not custom") << "\n";
+                  << featureTypeName(meta.feature) << " and metric is "
+                  << (metric == Metric::CUSTOM ? "custom" : "not custom") << "\n";
         return 1;
     }
 
@@ -270,6 +271,8 @@ int main(int argc, char** argv) {
     std::string topText = args.get("top", "10");
     std::string worstText = args.get("worst", "0");
     std::string root = args.get("root", DEFAULT_DATA_ROOT);
+    // gui=0 lets the web backend run query as a plain subprocess; the window would block forever
+    const bool showWindow = args.get("gui", "1") != "0";
     // Only "dnn" is meaningful: every other feature is read from the csv's .meta
     std::string featureName = args.get("feature");
     std::string db = args.get("db", (fs::path(root) / DEFAULT_IMAGE_SUBDIR).generic_string());
@@ -396,6 +399,9 @@ int main(int argc, char** argv) {
     // showResults blocks until the window is closed; flush so piped or redirected output is
     // visible before then
     std::cout.flush();
+    if (!showWindow) {
+        return 0;
+    }
     showResults(q.targetImage, matchedPaths, matchLabels, title.str(), 300);
     return 0;
 }

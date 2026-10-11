@@ -89,7 +89,8 @@ int extractAll(const std::vector<fs::path>& files, const fs::path& root, const F
         vectors.push_back(std::move(vec));
 
         if ((i + 1) % 100 == 0) {
-            std::cout << "[" << i + 1 << "/" << files.size() << "]\n";
+            // Flushed: piped stdout is fully buffered, and the web app reads these as progress
+            std::cout << "[" << i + 1 << "/" << files.size() << "]" << std::endl;
         }
     }
     return FEATURE_OK;
@@ -248,7 +249,7 @@ int main(int argc, char** argv) {
         std::cerr << "no images (.jpg/.jpeg/.png) found in " << db << "\n";
         return 1;
     }
-    std::cout << "found " << files.size() << " images\n";
+    std::cout << "found " << files.size() << " images" << std::endl;
 
     std::vector<std::string> imagePaths;
     std::vector<std::vector<float>> vectors;
