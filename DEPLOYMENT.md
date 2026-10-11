@@ -133,6 +133,20 @@ The script runs `netlify deploy --build` inside a `node:22` container on a clean
 Windows `node_modules`, `.next`, or `.env.local` (whose `CBIR_ROOT=..` must not reach the site). It reads
 the token that `netlify login` stored, so the token is never typed or printed.
 
+**Publishing a draft you already verified.** `--prod` rebuilds, so what goes live is a new build, not the
+one you checked. To publish the exact draft instead (it takes seconds), restore it by id. The id is the
+prefix of the draft URL, `<deploy-id>--content-based-image-retrieval.netlify.app`:
+
+```
+cd web
+netlify api restoreSiteDeploy --data '{"site_id":"<site id from .netlify/state.json>","deploy_id":"<deploy-id>"}'
+```
+
+The same command rolls back: restore any earlier deploy id, listed under **Deploys** in the Netlify UI.
+
+**What's live** (2026-10-11): deploy `6acb1951e7e622b4ef540a77`, which is `main` at `57dffac` (info
+popovers). The first production deploy was `6acb12d7728c68520a31025e`.
+
 ## 7. Verify
 
 Run these against the draft URL before `--prod`. The results below are from the first deploy:

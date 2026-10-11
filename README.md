@@ -10,10 +10,13 @@ similar to the target. The project has three parts:
 - **Web UI** (`web/`, Next.js) does the same from a browser, and can add new images to the database. It
   runs the two programs above, so its results are identical to the command line.
 
+**Live demo:** <https://content-based-image-retrieval.netlify.app>. This is a read-only search over the
+1,106 images. Adding images works when you run it locally.
+
 | Doc | Contents |
 |---|---|
 | [BUILD.md](BUILD.md) | Building the C++, the `extract`/`query` reference, exact commands for every task, building and running the web UI |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Diagram, request flows, design trade-offs, and what breaks at scale |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Diagram, how uploads and searches work, design decisions, what breaks at scale, roadmap |
 | [DEPLOYMENT.md](DEPLOYMENT.md) | Deploying the web UI to Netlify as a read-only search demo: the three scripts, the checks, and what broke on the first deploy |
 
 ## Quick start
@@ -33,16 +36,22 @@ cd web && npm install && npm run dev     # web UI at http://localhost:3000
 ![Search page](docs/web-search.png)
 
 - **Search:**
-  - **Target:** pick one from the database, or upload a one-off image (it is never added to the database).
+  - **Target:** pick one from the database, or use a one-off image. A one-off image is sent with each
+    search and never stored.
   - **Feature:** every feature file in `data/csv`, plus the provided ResNet18 embeddings.
   - **Metric:** only the ones that make sense for the chosen feature.
+  - **Info icons:** the ⓘ next to Feature and Metric explain, in two lines, how the current choice works.
   - **How many:** set the number of top matches and least-similar images.
-  - **Results:** shown as ranked tiles with distance bars, along with the exact `query` command that produced them. Any result can become the next target.
+  - **Results:** ranked tiles with distance bars, plus the exact `query` command that produced them. Any
+    result can become the next target.
 - **Database:**
   - Browse the images and drag in new ones.
-  - Uploads are indexed in the background with `extract append=1`, which computes only the new images. That takes a few seconds for all features, and searching keeps working throughout.
-- **Limitation:** the ResNet18-based features need a provided embedding, so they work only on the original
-  1,106 images.
+  - New images are indexed in the background by `extract append=1`, which computes only what's missing. All
+    features take a few seconds, and searching keeps working throughout.
+- **Limitation:** the ResNet18-based features need a provided embedding, so they only work with the
+  original 1,106 images as the target.
+
+How uploads work, step by step, is in [ARCHITECTURE.md](ARCHITECTURE.md#how-uploads-work).
 
 ## Tasks and results
 
@@ -73,4 +82,5 @@ a second test).
 - **Results window:** a wrapped, scrollable grid of labeled matches. Run any query with `top=12` or more to see it scroll.
 - **Least similar results:** `worst=N` also shows the N images farthest from the target.
 - **Custom feature (Task 7)**, described above.
-- **Web UI:** search from the browser and add images to the database. The design is in [ARCHITECTURE.md](ARCHITECTURE.md).
+- **Web UI:** search from the browser and add images to the database, deployed as a read-only demo. The
+  design is in [ARCHITECTURE.md](ARCHITECTURE.md) and the hosting in [DEPLOYMENT.md](DEPLOYMENT.md).

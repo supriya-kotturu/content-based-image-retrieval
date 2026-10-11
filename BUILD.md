@@ -202,9 +202,15 @@ npm run lint
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `CBIR_ROOT` | the folder above `web/` | The project root that holds `out/` and `data/`. Every program runs with this as its working directory. |
+| `CBIR_ROOT` | the folder above `web/` | The project root that holds `out/` and `data/`. Every program runs with this as its working directory. A relative value resolves against the server's working directory. |
+| `CBIR_READ_ONLY` | unset | `1` switches off database uploads and Rebuild (403, hidden in the UI) and lowers the upload limit to 4 MB. Used on Netlify. |
+| `CBIR_IMAGE_BASE` | unset | E.g. `/olympus`: serve database images as static files from that path instead of through `/api/image`. Used on Netlify. |
 
-To set it, create `web/.env.local` (gitignored) containing `CBIR_ROOT=..` or an absolute path.
+Locally, put them in `web/.env.local` (gitignored), e.g. `CBIR_ROOT=..`. To try the hosted behaviour on
+your machine, run `CBIR_READ_ONLY=1 npm run dev`.
+
+`GET /api/health` shows what the server resolved: working directory, `CBIR_ROOT`, whether the `query`
+binary exists, and the feature and image counts. Check it first when something can't be found.
 
 ### What the UI changes on disk
 
@@ -222,6 +228,10 @@ rm data/olympus/upload_*
 git checkout data/csv
 ```
 
+### Deploying
+
+The Linux build, staging and the Netlify deploy are three scripts in `deploy/`. See [DEPLOYMENT.md](DEPLOYMENT.md).
+
 ## Troubleshooting
 
 | Symptom | Cause and fix |
@@ -232,3 +242,4 @@ git checkout data/csv
 | `cannot append to it (status -4)` from `extract append=1` | The csv and its `.meta` disagree, for example after an interrupted write or a hand edit. Run the same command without `append=1` to rebuild it. |
 | Exit code `0xC0000135` when running an exe | The OpenCV DLLs are missing next to it. Re-run the CMake build, which copies them. |
 | The Database page shows red dots | Those feature files have fewer rows than the image folder. Click **Rebuild**, or wait for the re-index. |
+| A one-off image is rejected as too large | The limit is 10 MB locally and 4 MB with `CBIR_READ_ONLY=1`. |
