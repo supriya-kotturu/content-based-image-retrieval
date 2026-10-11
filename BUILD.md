@@ -43,7 +43,6 @@ changes are needed.
 data/olympus/                    the 1,106 database images (pic.0001.jpg ...), plus web uploads (upload_*)
 data/resNet/ResNet18_olym.csv    provided ResNet18 embeddings (512 values per image)
 data/csv/                        feature files written by extract (one .csv + one .meta each)
-data/tmp/                        one-off query images from the web UI (gitignored, deleted after 24 h)
 ```
 
 Paths stored in the csv files are relative to `data/` (for example `olympus/pic.0001.jpg`).
@@ -212,7 +211,7 @@ To set it, create `web/.env.local` (gitignored) containing `CBIR_ROOT=..` or an 
 | Action | Writes |
 |---|---|
 | Search with a database image | Nothing |
-| Search with a one-off upload | `data/tmp/<uuid>.jpg` (deleted after 24 h) |
+| Search with a one-off upload | A temp file in the OS temp folder, deleted when the search finishes |
 | Upload to the database | `data/olympus/upload_*`, then `extract append=1` rewrites every **git-tracked** `data/csv/*.csv` and `*.meta` file with one more row |
 | Rebuild (Database page) | Every `data/csv` file, recomputed from scratch |
 

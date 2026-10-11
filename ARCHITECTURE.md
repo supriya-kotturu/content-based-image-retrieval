@@ -44,7 +44,7 @@ results table is reproduced through the UI.
 | C++ file | Purpose |
 |---|---|
 | `src/extract.cpp`, `src/query.cpp` | The two programs |
-| `src/features.cpp`, `include/features.h` | Feature extractors and their status codes |
+| `src/features.cpp`, `include/image_features.h` | Feature extractors and their status codes |
 | `src/sobel.cpp`, `include/sobel.h` | Sobel X/Y and gradient magnitude (reused from Project 1) |
 | `src/metrics.cpp`, `include/metrics.h` | Distance metrics |
 | `src/feature_store.cpp`, `include/feature_store.h` | Saving and loading feature files with their `.meta` |
@@ -59,10 +59,10 @@ results table is reproduced through the UI.
 | `web/lib/cbir.ts` | **The only module that knows the programs exist.** Builds the argument arrays, spawns the programs, parses the `rank ⇥ distance ⇥ path` output, and reports `extract` progress. |
 | `web/lib/jobs.ts` | Runs one `extract` pass at a time: `append` after uploads, `full` from the Rebuild button. An upload that arrives during a run queues exactly one more pass. Queries are never blocked. |
 | `web/lib/meta.ts` | Lists features from `data/csv/*.meta`, so a new csv shows up in the UI without code changes. Also reads which images each csv has a row for (cached by file mtime). That's the source of truth for availability. |
-| `web/lib/images.ts` | Lists the database, validates uploads (extension, 10 MB limit, JPEG/PNG magic bytes), and stores one-off targets. |
+| `web/lib/images.ts` | Lists the database, validates uploads (extension, size limit, JPEG/PNG magic bytes), and holds a one-off target for the length of one search. |
 | `web/lib/compat.ts` | The feature → valid metrics table and the API types. It is shared by client and server. |
 | `web/lib/paths.ts` | `CBIR_ROOT` resolution and the path-traversal guard. |
-| `web/app/api/*/route.ts` | Thin HTTP layer: `config`, `images`, `image`, `targets`, `query`, `reindex`. |
+| `web/app/api/*/route.ts` | Thin HTTP layer: `config`, `images`, `image`, `query`, `reindex`, `health`. |
 | `web/components/*` | Search and Database views (shadcn/ui on Base UI, Tailwind). |
 
 ### Request flows
@@ -93,7 +93,14 @@ disagree with what `query` searches. One rule covers every image, original or up
 `usable(f) = !f.targetFromIndex || !image.missing.includes(f.id)`. Pixel features work for any target because
 `query` computes the target's vector from the image file. The two ResNet features need the target's own row.
 
-**One-off target** (`POST /api/targets`, then `POST /api/query`): the image is saved to `data/tmp/<uuid>.<ext>`. That folder isn't scanned by `extract`, so the image is never indexed. Files older than 24 h are deleted.
+**One-off target** (`POST /api/query` as multipart, with `file` plus `request` JSON):
+- The browser keeps the file and sends it with each search.
+- The server writes it to the OS temp folder, runs `query`, and deletes it in a `finally` block.
+- Nothing survives between requests. That's what lets it work on serverless hosts, where the next request
+  may land on a different instance.
+
+An earlier version uploaded the image first and searched in a second request, which breaks for exactly
+that reason.
 
 ## Design decisions and trade-offs
 

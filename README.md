@@ -14,7 +14,7 @@ similar to the target. The project has three parts:
 |---|---|
 | [BUILD.md](BUILD.md) | Building the C++, the `extract`/`query` reference, exact commands for every task, building and running the web UI |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Diagram, request flows, design trade-offs, and what breaks at scale |
-| [DEPLOYMENT.md](DEPLOYMENT.md) | Deploying the web UI to Netlify (as a read-only search demo) and what has to change first |
+| [DEPLOYMENT.md](DEPLOYMENT.md) | Deploying the web UI to Netlify as a read-only search demo: the three scripts, the checks, and what broke on the first deploy |
 
 ## Quick start
 
