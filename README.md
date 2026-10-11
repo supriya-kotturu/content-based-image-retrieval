@@ -1,160 +1,76 @@
 # Content-based Image Retrieval
 
-Given a target image and a database of images (`data/olympus`, 1,106 photos), the programs return the
-images most similar to the target. The work is split into two programs so the slow step is done once:
+Given a target image and a database of images (`data/olympus`, 1,106 photos), find the images most
+similar to the target. The project has three parts:
 
-- `extract` computes one feature vector per database image and saves them (a csv plus a `.meta`).
-- `query` loads a saved feature file, ranks every image by distance to the target, prints the best
-  matches and shows them in a window.
+- **`extract`** (C++/OpenCV) computes one feature vector per database image and saves them to a csv,
+  with a `.meta` file describing how they were made.
+- **`query`** (C++/OpenCV) ranks every image by distance to a target and shows the best and least similar
+  matches in a scrollable results window.
+- **Web UI** (`web/`, Next.js) does the same from a browser, and can add new images to the database. It
+  runs the two programs above, so its results are identical to the command line.
 
-## Environment
-
-- Windows 11, Visual Studio Code, MSVC (Visual Studio Build Tools), CMake 3.15 or newer, C++17.
-- OpenCV 5 (found through `C:/opencv/build`, or pass `-DOpenCV_DIR=<folder with OpenCVConfig.cmake>`).
-
-## Build
-
-From the project folder:
-
-```
-cmake -S . -B build
-cmake --build build --config Release
-```
-
-This produces `out/extract.exe` and `out/query.exe`. Use **Release**: a Debug build runs the pixel
-loops several times slower (extracting `texture_color` took 77 s in Debug and 15 s in Release).
-Debug and Release libraries go to separate folders under `out/lib/`, so switching between them is safe.
-
-## Data layout
-
-```
-data/olympus/            the 1,106 database images (pic.0001.jpg ...)
-data/resNet/ResNet18_olym.csv   provided ResNet18 embeddings (512 values per image)
-data/csv/                feature files written by extract (one .csv + one .meta each)
-```
-
-Paths stored in the csv files are relative to `data/` (for example `olympus/pic.0001.jpg`), so a feature
-file does not depend on where the project folder is.
-
-## extract
-
-```
-./out/extract.exe db=data/olympus feature=<name> [bins=16] [patch=<odd size>] [dnn=<csv>] [out=<dir>] [root=data]
-```
-
-| feature | what it is | parameters | output file |
-|---|---|---|---|
-| `baseline` | 7x7 pixel square at the center of the image | `patch` (default 7) | `baseline_7x7.csv` |
-| `histogram` | whole-image rg chromaticity histogram | `bins` (default 16, per axis) | `histogram_16.csv` |
-| `multi_histogram` | top half rg + bottom half bg histograms + a center RGB histogram | `bins`, `patch` (center square, default 101) | `multi_histogram_16_c101.csv` |
-| `texture_color` | rg histogram + histogram of Sobel gradient magnitudes | `bins` | `texture_color_16.csv` |
-| `orange_dnn` | custom: provided embedding + histogram of the strongly orange pixels | `dnn=` (required) | `orange_dnn.csv` |
-
-- Each feature file has a `.meta` next to it (same name) recording the feature, its parameters, and
-  the row and vector counts. `query` reads it, so the target is computed exactly like the database
-  images, and a csv without its `.meta` is refused.
-- `extract` skips images it cannot read, prints why, and stops if a parameter is invalid.
-  Output is overwritten on every run.
-- Unknown or misspelled arguments are reported instead of silently ignored.
-
-## query
-
-```
-./out/query.exe csv=<feature csv> target=<image> metric=<name> [top=10] [worst=0] [root=data] [gui=0]
-```
-
-| metric | use with |
+| Doc | Contents |
 |---|---|
-| `ssd` | `baseline` (sum of squared differences, written from scratch) |
-| `intersection` | `histogram` (1 - histogram intersection) |
-| `multi` | `multi_histogram`, `texture_color` (equally weighted mean of 1 - intersection per piece) |
-| `cosine` | the provided embeddings (1 - cos of the angle) |
-| `custom` | `orange_dnn` (0.7 x cosine of the embedding + 0.3 x (1 - intersection of the orange shade)) |
+| [BUILD.md](BUILD.md) | Building the C++, the `extract`/`query` reference, exact commands for every task, building and running the web UI |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Diagram, request flows, design trade-offs, and what breaks at scale |
+| [DEPLOYMENT.md](DEPLOYMENT.md) | Deploying the web UI to Netlify (as a read-only search demo) and what has to change first |
 
-For the provided embeddings, which have no `.meta` and cannot be recomputed:
+## Quick start
 
-```
-./out/query.exe feature=dnn csv=data/resNet/ResNet18_olym.csv target=pic.0893.jpg metric=cosine [db=data/olympus]
-```
-
-`query` prints `rank, distance, file` for the best `top` matches (the target itself is excluded) and, with
-`worst=N`, the N least similar. It then opens a window with the target and the matches; q, Esc or closing
-the window quits.
-
-## Running each task
-
-Build first, then extract once per feature and query as many targets as you like.
-
-| task | extract | query (target; metric) | top three I get |
-|---|---|---|---|
-| 1 baseline | `feature=baseline` | `pic.1016.jpg`; `ssd` | 0986, 0641, 0547 (4th: 1013), as in the reference result |
-| 2 histogram | `feature=histogram` | `pic.0164.jpg`; `intersection` | 0080, 1032, 0461 |
-| 3 multi-histogram | `feature=multi_histogram` | `pic.0274.jpg`; `multi` | 0409, 1055, 0275 |
-| 4 texture + color | `feature=texture_color` | `pic.0535.jpg`; `multi` | 0745, 0011, 0004 |
-| 5 DNN embeddings | none (provided) | `feature=dnn` with `pic.0893.jpg` and `pic.0164.jpg`; `cosine` | 0897, 0136, 0146 and 1032, 0213, 0690 |
-| 6 DNN vs classic | none | `pic.0948`, `pic.1072`, `pic.0734`: the DNN command above, and the `histogram` and `multi_histogram` queries | see the report |
-| 7 custom | `feature=orange_dnn dnn=data/resNet/ResNet18_olym.csv` | `pic.0323.jpg` (mask) and `pic.0281.jpg` (basketball); `custom`, with `top=5 worst=3` | see the report |
-
-Example, task 4:
+Windows 11, MSVC, CMake ≥ 3.15 and OpenCV 5 are needed. Full details are in [BUILD.md](BUILD.md).
 
 ```
+cmake -S . -B build && cmake --build build --config Release
 ./out/extract.exe db=data/olympus feature=texture_color bins=16
 ./out/query.exe csv=data/csv/texture_color_16.csv target=data/olympus/pic.0535.jpg metric=multi top=3
+
+cd web && npm install && npm run dev     # web UI at http://localhost:3000
 ```
 
-## Task 7: custom design
+## Web UI
 
-Goal: find photos that contain one specific strongly orange object (an orange mask, and a basketball as
-a second test). The feature is the 512-value ResNet18 embedding followed by a 32-value histogram (8 hue
-x 4 saturation bins) of only the pixels that are strongly orange (hue 4 to 35 degrees, saturation and
-brightness at least 0.6), so it records the object's shade and ignores the background. The distance is
-`0.7 x cosine(embedding) + 0.3 x (1 - intersection(orange shade))`.
+![Search page](docs/web-search.png)
+
+- **Search:**
+  - **Target:** pick one from the database, or upload a one-off image (it is never added to the database).
+  - **Feature:** every feature file in `data/csv`, plus the provided ResNet18 embeddings.
+  - **Metric:** only the ones that make sense for the chosen feature.
+  - **How many:** set the number of top matches and least-similar images.
+  - **Results:** shown as ranked tiles with distance bars, along with the exact `query` command that produced them. Any result can become the next target.
+- **Database:**
+  - Browse the images and drag in new ones.
+  - Uploads are indexed by re-running `extract` for every feature in the background, with live progress. Searches pause until it finishes.
+- **Limitation:** the ResNet18-based features need a provided embedding, so they work only on the original
+  1,106 images.
+
+## Tasks and results
+
+Commands for each task are in [BUILD.md](BUILD.md#commands-for-each-task).
+
+| Task | Feature; metric | Target | Top three |
+|---|---|---|---|
+| 1 Baseline | 7x7 center patch; SSD | `pic.1016` | 0986, 0641, 0547 (4th: 1013), as in the reference result |
+| 2 Histogram | rg chromaticity, 16 bins; intersection | `pic.0164` | 0080, 1032, 0461 |
+| 3 Multi-histogram | top/bottom halves + center; multi | `pic.0274` | 0409, 1055, 0275 |
+| 4 Texture + color | rg + Sobel magnitude; multi | `pic.0535` | 0745, 0011, 0004 |
+| 5 DNN embeddings | ResNet18; cosine | `pic.0893`, `pic.0164` | 0897, 0136, 0146 and 1032, 0213, 0690 |
+| 6 DNN vs classic | ResNet18 vs histogram / multi-histogram | `pic.0948`, `pic.1072`, `pic.0734` | see the report |
+| 7 Custom | orange object + ResNet18; custom | `pic.0323` (mask), `pic.0281` (basketball) | see the report |
+
+### Task 7: custom design
+
+Goal: find photos that contain one specific, strongly orange object (an orange mask, with a basketball as
+a second test).
+
+- **Feature:** the 512-value ResNet18 embedding, followed by a 32-value histogram (8 hue × 4 saturation
+  bins). The histogram counts only strongly orange pixels: hue 4–35°, saturation and brightness ≥ 0.6.
+  That way it records the object's shade and ignores the background.
+- **Distance:** `0.7 × cosine(embedding) + 0.3 × (1 − intersection(orange shade))`.
 
 ## Extensions
 
-- **Results window (GUI):** the target and its matches are shown in a wrapped grid, each labeled with
-  rank, file name and distance, with the feature, parameters and metric in the title. The window scrolls
-  vertically (mouse wheel, arrow keys, PageUp/PageDown, Home/End). To try it, run any `query` command
-  with `top=12` (or more) so the grid wraps and scrolls.
-- **Least similar results:** `worst=3` also prints and shows the three images farthest from the target.
-- **Custom feature (task 7)** and the mask/basketball comparison described above.
-- **Web app (`web/`):** a Next.js front end over the same two programs, described below.
-
-## Web app
-
-A local Next.js app (`web/`) for searching from the browser and adding images to the database. It does
-not reimplement any feature: every ranking is a `query` run and every re-index is an `extract` run, so
-results are identical to the command line.
-
-```
-cmake --build build --config Release      # the app calls out/query.exe and out/extract.exe
-cd web
-npm install
-npm run dev                               # http://localhost:3000
-```
-
-- **Search:** pick a target from the database or upload a one-off image (saved to `data/tmp`, never
-  indexed), choose a feature (one per `.meta` in `data/csv`, plus the provided ResNet18 embeddings) and a
-  metric valid for it, and set how many best and least similar matches to show. The exact `query`
-  command that produced the results is shown under the target.
-- **Database:** uploads go into `data/olympus` as `upload_<time>_<name>.jpg`, then `extract` is re-run in
-  the background for every existing feature file, with the same parameters as its `.meta`. Searches are
-  refused (HTTP 409) while that runs, because `extract` rewrites the csv files in place. Note that this
-  changes the tracked files in `data/csv`.
-- **Limitation:** the ResNet18 and `orange_dnn` features need a provided embedding, which uploaded
-  images do not have, so those features are disabled for uploaded and one-off targets.
-- `query gui=0` prints the results without opening the window, which is how the app runs it.
-- The app finds the project through `CBIR_ROOT` (default: the folder above `web/`).
-
-## Source files
-
-| file | purpose |
-|---|---|
-| `src/extract.cpp`, `src/query.cpp` | the two programs |
-| `src/features.cpp`, `include/features.h` | the feature extractors and their status codes |
-| `src/sobel.cpp`, `include/sobel.h` | Sobel X/Y and gradient magnitude, reused from Project 1 |
-| `src/metrics.cpp`, `include/metrics.h` | the distance metrics |
-| `src/feature_store.cpp`, `include/feature_store.h` | saving and loading feature files with their `.meta` |
-| `src/display.cpp`, `include/display.h` | the results window |
-| `src/common.cpp`, `include/common.h` | the `key=value` argument parser |
-| `src/csv_util.cpp`, `include/csv_util.h` | csv reading and writing provided with the assignment (unchanged) |
+- **Results window:** a wrapped, scrollable grid of labeled matches. Run any query with `top=12` or more to see it scroll.
+- **Least similar results:** `worst=N` also shows the N images farthest from the target.
+- **Custom feature (Task 7)**, described above.
+- **Web UI:** search from the browser and add images to the database. The design is in [ARCHITECTURE.md](ARCHITECTURE.md).
