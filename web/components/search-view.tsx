@@ -18,7 +18,8 @@ import { ResultGrid } from "@/components/result-grid";
 import { ReindexBanner } from "@/components/reindex-banner";
 import { useReindex } from "@/hooks/use-reindex";
 import { api, fetchCatalog, postJson } from "@/lib/api";
-import { METRIC_LABEL, isUsable, type DbImage, type FeatureInfo, type Match, type Metric, type QueryResponse } from "@/lib/compat";
+import { InfoHint } from "@/components/info-hint";
+import { FEATURE_INFO, METRIC_INFO, METRIC_LABEL, isUsable, type DbImage, type FeatureInfo, type Match, type Metric, type QueryResponse } from "@/lib/compat";
 
 // Only which image is selected; what it's indexed in is derived from the latest image list, so it
 // updates by itself when a re-index finishes
@@ -222,7 +223,16 @@ export function SearchView() {
           <section className="card-surface space-y-4 p-4">
             <h2 className="panel-title">2 · Feature & metric</h2>
             <div className="space-y-1.5">
-              <Label>Feature</Label>
+              <div className="flex items-center gap-1">
+                <Label>Feature</Label>
+                {feature && (
+                  <InfoHint
+                    label={`About ${feature.label}`}
+                    title={`${feature.label} · ${feature.detail}`}
+                    lines={FEATURE_INFO[feature.kind]}
+                  />
+                )}
+              </div>
               <Select
                 items={featureItems}
                 value={feature?.id ?? null}
@@ -257,7 +267,12 @@ export function SearchView() {
             </div>
 
             <div className="space-y-1.5">
-              <Label>Distance metric</Label>
+              <div className="flex items-center gap-1">
+                <Label>Distance metric</Label>
+                {metric && (
+                  <InfoHint label={`About ${METRIC_LABEL[metric]}`} title={METRIC_LABEL[metric]} lines={METRIC_INFO[metric]} />
+                )}
+              </div>
               <Select items={metricItems} value={metric} onValueChange={(v) => setMetric(v as Metric)}>
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="Choose a metric" />

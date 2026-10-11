@@ -22,7 +22,7 @@ export function SiteHeader() {
           <span className="grid size-8 place-items-center rounded-lg bg-brand text-brand-foreground shadow-sm">
             <ScanSearchIcon className="size-4.5" />
           </span>
-          <span className="font-heading text-[1.05rem] font-semibold tracking-tight">
+          <span className="font-heading text-[1.05rem] font-semibold tracking-tight whitespace-nowrap">
             CBIR<span className="text-muted-foreground font-normal"> Studio</span>
           </span>
         </Link>

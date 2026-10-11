@@ -37,6 +37,58 @@ export const FEATURE_LABEL: Record<FeatureKind, string> = {
   dnn: "ResNet18 embedding",
 };
 
+// Two lines each: how it works, then what that means for matching. Kept in step with
+// src/features.cpp and src/metrics.cpp; the UI shows them next to the dropdowns.
+export const FEATURE_INFO: Record<FeatureKind, [string, string]> = {
+  baseline: [
+    "The raw RGB values of the small square at the image center (7×7 → 147 numbers).",
+    "Very fast, but only sees the middle of the picture: a shifted subject is a different image.",
+  ],
+  histogram: [
+    "Each pixel becomes rg chromaticity (r = R/(R+G+B), g = G/(R+G+B)), counted into a 2-D grid of bins.",
+    "Captures the overall color mix and ignores brightness and where colors are.",
+  ],
+  multi_histogram: [
+    "Three histograms side by side: rg of the top half, bg of the bottom half, and RGB of a center square.",
+    "Adds coarse layout to color, e.g. blue sky above green ground, or an object in the middle.",
+  ],
+  texture_color: [
+    "A whole-image rg histogram plus a histogram of Sobel edge strengths (square-root binned).",
+    "Matches images with similar colors and a similar amount of edges: smooth walls vs busy foliage.",
+  ],
+  orange_dnn: [
+    "The ResNet18 embedding plus a hue × saturation histogram of only strongly orange pixels.",
+    "Finds the same kind of scene that also contains a similarly shaded orange object (Task 7).",
+  ],
+  dnn: [
+    "512 numbers per image from a ResNet18 network trained on ImageNet, provided with the assignment.",
+    "Encodes what is in the picture (objects, scene type) rather than raw colors or layout.",
+  ],
+};
+
+export const METRIC_INFO: Record<Metric, [string, string]> = {
+  ssd: [
+    "Σ (aᵢ − bᵢ)² over every value; 0 means identical.",
+    "Punishes big differences heavily and depends on scale, so it suits raw pixel values best.",
+  ],
+  intersection: [
+    "1 − Σ min(aᵢ, bᵢ) over the bins: the share of color mass the two images don't have in common.",
+    "0 = identical histograms, 1 = no overlap at all.",
+  ],
+  multi: [
+    "1 − intersection for each piece of the vector separately, then the plain average of those.",
+    "Every piece counts equally, so a piece with more bins can't drown out the others.",
+  ],
+  cosine: [
+    "1 − cos θ between the two vectors: compares their direction, not their length.",
+    "The usual choice for embeddings, where overall magnitude carries little meaning.",
+  ],
+  custom: [
+    "0.7 × cosine distance of the embeddings + 0.3 × (1 − intersection) of the orange histograms.",
+    "Mostly 'same kind of scene', partly 'same shade of orange'; the weights were tuned on the mask photos.",
+  ],
+};
+
 // query computes most targets from pixels, but these read the target's vector from the index (the
 // embedding half comes from the provided ResNet csv, and there's no network to compute it), so the
 // target must already have a row

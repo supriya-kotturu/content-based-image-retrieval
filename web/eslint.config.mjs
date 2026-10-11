@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Netlify CLI build output and deploy/stage-netlify.sh copies
+    ".netlify/**",
+    "cbir/**",
+    "public/olympus/**",
   ]),
 ]);
 
